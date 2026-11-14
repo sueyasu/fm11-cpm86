@@ -26,6 +26,28 @@ BIOS_READ   equ BIOS_BASE+13*3
 BIOS_WRITE  equ BIOS_BASE+14*3
 BIOS_SETDMAB equ BIOS_BASE+17*3
 
+; 8086 supports only short conditional jumps: take the near JMP on error.
+%macro FAIL_Z 0
+    jnz %%ok
+    jmp test_failed
+%%ok:
+%endmacro
+%macro FAIL_NZ 0
+    jz %%ok
+    jmp test_failed
+%%ok:
+%endmacro
+%macro FAIL_C 0
+    jnc %%ok
+    jmp test_failed
+%%ok:
+%endmacro
+%macro FAIL_RESTORE_C 0
+    jnc %%ok
+    jmp restore_failed
+%%ok:
+%endmacro
+
 entry:
     cli
     xor ax,ax
@@ -68,7 +90,9 @@ entry:
     mov dh,1
 .side_ready:
     call fdc_read
-    jc load_failed
+    jnc .loaded_sector
+    jmp load_failed
+.loaded_sector:
     add bp,256
     inc si
     cmp si,17
@@ -88,7 +112,7 @@ entry:
     xor dx,dx
     call 0x0000:BIOS_SELDSK
     or bx,bx
-    jz test_failed
+    FAIL_Z
     mov cx,2                ; track 2 = cylinder 1, side 0
     call 0x0000:BIOS_SETTRK
     xor cx,cx               ; DMA segment 0
@@ -101,11 +125,11 @@ entry:
     call 0x0000:BIOS_SETDMA
     call 0x0000:BIOS_READ
     or al,al
-    jnz test_failed
+    FAIL_NZ
     mov si,RECORD0
     mov ah,0x5A
     call verify_record
-    jc test_failed
+    FAIL_C
 
     ; Read logical record 1; verify the other 128-byte half.
     mov cx,1
@@ -114,11 +138,11 @@ entry:
     call 0x0000:BIOS_SETDMA
     call 0x0000:BIOS_READ
     or al,al
-    jnz test_failed
+    FAIL_NZ
     mov si,RECORD1
     mov ah,0xA5
     call verify_record
-    jc test_failed
+    FAIL_C
     mov si,msg_read
     call puts
 
@@ -143,7 +167,7 @@ entry:
     call 0x0000:BIOS_SETDMA
     call 0x0000:BIOS_WRITE
     or al,al
-    jnz test_failed
+    FAIL_NZ
 
     ; Read record 0 back into a separate location and compare.
     xor cx,cx
@@ -152,11 +176,11 @@ entry:
     call 0x0000:BIOS_SETDMA
     call 0x0000:BIOS_READ
     or al,al
-    jnz test_failed
+    FAIL_NZ
     mov si,CHECKBUF
     mov ah,0xC3
     call verify_record
-    jc test_failed
+    FAIL_C
 
     ; Verify READ/MODIFY/WRITE preserved the other half of the sector.
     mov cx,1
@@ -165,14 +189,14 @@ entry:
     call 0x0000:BIOS_SETDMA
     call 0x0000:BIOS_READ
     or al,al
-    jnz test_failed
+    FAIL_NZ
     mov si,CHECKHALF
     mov ah,0xA5
     call verify_record
-    jc test_failed
+    FAIL_C
 
     call restore_sector
-    jc restore_failed
+    FAIL_RESTORE_C
     mov byte [DIRTY_FLAG],0
     mov si,msg_pass
     call puts
@@ -188,7 +212,7 @@ test_failed:
     cmp byte [DIRTY_FLAG],0
     je stop
     call restore_sector
-    jc restore_failed
+    FAIL_RESTORE_C
     mov si,msg_restored
     call puts
     jmp stop
