@@ -1,0 +1,6 @@
+/build/
+/external/system/*.bin
+/external/commands/*.CMD
+/external/commands/*.cmd
+*.pyc
+__pycache__/
