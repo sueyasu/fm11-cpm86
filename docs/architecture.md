@@ -31,8 +31,22 @@ The first-stage diagnostic ROM does not enter this resident image.
   The special boot track has different sector sizes; IPL must account for it.
 - CP/M physical sectors need 128-byte logical record deblocking.
 
-The first BIOS provides only serial console service and returns disk errors.
-Actual FDC/DMA integration, timeouts and retry handling are separate
+The first disk-BIOS step now provides DPH/DPB records for A:..D: as four
+independent 2D units. The provisional filesystem parameters are:
+
+- 32 CP/M records (128 bytes each) per logical side-track.
+- 2 KiB allocation blocks; 156 data blocks numbered 0..155.
+- 64 directory entries (one reserved allocation block).
+- Two reserved side-tracks at the start of the disk.
+- Per-drive CSV (16 bytes) and ALV (20 bytes), plus a shared 128-byte DIRBUF.
+
+These parameters describe a proposed CP/M-86 filesystem layout, **not** the
+FM-11 boot-track format. They require verification when an IPL and disk-image
+builder exist. The driver returns errors on READ/WRITE until the direct
+8088 FDC/8237 transport and 256-to-128-byte deblocking are implemented.
+The DPH pointers must not be treated as evidence that media I/O works.
+
+Actual FDC/DMA integration, timeouts and retry handling remain separate
 milestones.
 
 ## Known emulator integration questions
