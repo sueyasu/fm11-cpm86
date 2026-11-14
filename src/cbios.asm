@@ -225,7 +225,15 @@ rw_2d:
     jc .error
 
     ; BX is preserved by the physical sector routine: 0/1 half selector.
-    shl bx,7                ; byte offset of the selected half
+    ; 8086 only permits an immediate shift count of one.
+    ; Do not use CL here: it still holds the sector number for WRITE.
+    shl bx,1
+    shl bx,1
+    shl bx,1
+    shl bx,1
+    shl bx,1
+    shl bx,1
+    shl bx,1                ; byte offset of the selected half
     cld
     test bp,0x0100
     jnz .write_half
