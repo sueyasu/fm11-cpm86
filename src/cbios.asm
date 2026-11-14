@@ -249,7 +249,7 @@ fdc2d_transfer:
     add ax,fdc2d_buffer
     adc dx,0
     cmp ax,0xff00
-    ja .bad
+    ja .invalid
     mov si,ax                ; 16-bit DMA address
     mov di,dx                ; DMA bank (bits 16..19)
 
