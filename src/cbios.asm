@@ -5,6 +5,7 @@
 cpu 8086
 bits 16
 org 0x2500
+bios_start:
 
 SER_DATA     equ 0xFD06
 SER_STATUS   equ 0xFD07
@@ -189,4 +190,4 @@ mrt:
     db 1
     dw 0x0800,0x7800
 
-times (0x2500 + BIOS_SIZE - $) db 0
+times BIOS_SIZE - ($ - bios_start) db 0
