@@ -23,6 +23,17 @@ entry:
     out dx,al
     mov al,0x37
     out dx,al
+
+    ; SDL creates its PTY before the guest CPU starts, but does not wait
+    ; for a terminal to attach.  Wait for one incoming byte before any
+    ; diagnostic output, so the user can connect and press a key.
+.wait_serial:
+    mov dx,SER_STATUS
+    in al,dx
+    test al,0x02           ; USART RX ready
+    jz .wait_serial
+    mov dx,SER_DATA
+    in al,dx               ; consume trigger byte
     mov si,msg_start
     call puts
 
