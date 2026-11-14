@@ -75,6 +75,44 @@ Alternatively, test the ROM independently using
 `fm11-8088-romtrace --rom build/bootrom.bin --instructions 10000`.
 The expected result is a HLT, not an OS boot.
 
+## Read-only 2D FDC diagnostic
+
+A separate firmware image tests one physical Mini-FDC sector without
+loading CP/M-86 or modifying the disk:
+
+```sh
+make diag
+make test
+```
+
+This produces `build/fdc2d_diag.bin` (4096 bytes). Configure the emulator
+for the 8088 card, mount a **2D** floppy image on the Mini FDC's **unit 0**,
+and start `fm11-sdl` with:
+
+```sh
+fm11-sdl --8088-rom build/fdc2d_diag.bin
+```
+
+Use the existing PTY/serial output facility to observe the diagnostic.
+The ROM reads physical cylinder 0, head 0, sector 1 (256 bytes) through
+8237 DMA channel 0 into physical RAM 0000:2000. It checks FDC completion
+and DMA terminal count, then prints the first 16 bytes in hexadecimal.
+Expected output begins with:
+
+```text
+FM-11 2D DMA read C0/H0/S1
+PASS: TC=1, data: ...
+```
+
+On failure it prints `FAIL: FDC status or DMA terminal count`.
+**No WRITE SECTOR command is issued**, so the diagnostic does not alter
+the floppy. This is a hardware-path test, not a full execution test of
+CBIOS `READ`/`WRITE` or of the 128-byte record mapping. The
+`fm11-8088-romtrace` standalone tool does not mount a disk, so it is
+not sufficient for a successful floppy-read test. `make test` performs
+static ROM checks only; a successful test is not a claim of emulated or
+physical I/O success.
+
 ## Next milestones
 
 1. Confirm 8088 ROM reset and serial console on `fm11-sdl`/romtrace.
