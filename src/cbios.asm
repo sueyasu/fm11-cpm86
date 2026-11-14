@@ -227,15 +227,19 @@ fdc2d_transfer:
 
     mov bx,ax                ; BL=drive, BH=8237 mode
     cmp bl,0                 ; emulator Mini FDC currently selects unit 0
-    jne .bad
+    jne .invalid
     cmp ch,40
-    jae .bad
+    jae .invalid
     cmp dh,1
-    ja .bad
+    ja .invalid
     cmp cl,1
-    jb .bad
+    jb .invalid
     cmp cl,16
-    ja .bad
+    ja .invalid
+    jmp short .validated
+.invalid:
+    jmp .bad               ; 8086 conditional branches have 8-bit reach
+.validated:
 
     ; Convert the real-mode CS:offset into an 8237 bank:offset address.
     ; 256-byte transfer must not cross a 64 KiB DMA page boundary.
