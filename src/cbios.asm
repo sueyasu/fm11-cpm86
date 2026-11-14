@@ -190,4 +190,5 @@ mrt:
     db 1
     dw 0x0800,0x7800
 
-times BIOS_SIZE - ($ - bios_start) db 0
+; Use the NASM section base ($) for an absolute, assembly-time size.
+times BIOS_SIZE - ($ - $) db 0
