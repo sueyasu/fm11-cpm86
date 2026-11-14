@@ -46,8 +46,26 @@ builder exist. The driver returns errors on READ/WRITE until the direct
 8088 FDC/8237 transport and 256-to-128-byte deblocking are implemented.
 The DPH pointers must not be treated as evidence that media I/O works.
 
-Actual FDC/DMA integration, timeouts and retry handling remain separate
-milestones.
+The initial 2D physical-sector transport is now present in `src/cbios.asm`
+as `fdc2d_read` and `fdc2d_write`.  Both use the Mini FDC registers
+FD18h/FD19h/FD1Ah/FD1Ch/FD1Dh and 8237 channel 0 (10h/11h/18h/1Ah/
+1Bh/1Ch/20h).  The transfer is exactly 256 bytes into or out of the
+BIOS-local `fdc2d_buffer`.  Entry registers are AL=drive, CH=cylinder,
+DH=head, CL=physical-sector (1-based); CF reports success/failure.
+The implementation checks DMA terminal count and FDC completion status,
+and masks CH0 on return. DMA CH0 is owned exclusively during the call.
+
+**Limitations:** This is preliminary hardware transport, not yet called
+by CP/M `READ`/`WRITE`.  The emulator currently models Mini-FDC drive
+0 only; other drive numbers fail explicitly.  No retry, media change
+handling or 128-byte deblocking is implemented.  Actual timing and
+status behavior must be checked on hardware.  The DMA bounce-buffer
+address is derived from CS and rejected if it crosses a 64 KiB page;
+an IPL must establish the final resident segment correctly.
+
+Next implement CP/M record-to-CHS conversion, read-modify-write
+deblocking, DMA buffer coherency and physical-sector tests before
+enabling BDOS disk reads and writes.
 
 ## Known emulator integration questions
 
