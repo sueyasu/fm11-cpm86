@@ -169,9 +169,110 @@ SETDMAB:
     mov [dma_seg],cx
     ret
 
+; CP/M-86 128-byte record I/O for Mini FDC (2D).
+; A CP/M track represents one physical side (32 records).
+; The current emulator supports physical Mini FDC unit 0 only.
+; Each write reads the whole physical sector before changing one half.
 READ:
+    xor ah,ah               ; read
+    jmp short rw_2d
 WRITE:
-    mov al,1              ; CP/M-86 BIOS status: error, not success
+    mov ah,1                ; write
+rw_2d:
+    push bx
+    push cx
+    push dx
+    push si
+    push di
+    push bp
+    push ds
+    push es
+    mov bp,ax               ; preserve read/write flag in AH
+    push cs
+    pop ds                  ; BIOS variables and bounce buffer use CS
+    push cs
+    pop es
+
+    mov bx,[cur_track]
+    cmp bx,80               ; 40 cylinders * 2 side-tracks
+    jae .invalid
+    mov bx,[cur_sector]
+    cmp bx,32               ; 128-byte logical records, numbered 0..31
+    jae .invalid
+    mov bx,[dma_off]
+    cmp bx,0xff80           ; prevent a 128-byte segment wrap
+    ja .invalid
+    cmp byte [cur_disk],0   ; Mini FDC emulator currently models unit 0
+    jne .invalid
+    jmp short .valid
+.invalid:
+    jmp .error
+.valid:
+    ; Translate side-track and logical record to physical CHS.
+    mov bx,[cur_track]
+    mov dx,bx
+    and dl,1
+    mov dh,dl               ; physical head = track & 1
+    shr bx,1
+    mov ch,bl               ; cylinder = track / 2
+    mov bx,[cur_sector]
+    mov cl,bl
+    shr cl,1
+    inc cl                  ; physical sector = record / 2 + 1
+    and bx,1
+    mov al,[cur_disk]
+    call fdc2d_read
+    jc .error
+
+    ; BX is preserved by the physical sector routine: 0/1 half selector.
+    shl bx,7                ; byte offset of the selected half
+    cld
+    test bp,0x0100
+    jnz .write_half
+
+    ; READ: BIOS buffer -> selected caller DMA segment:offset.
+    mov si,fdc2d_buffer
+    add si,bx
+    mov di,[dma_off]
+    mov ax,[dma_seg]
+    mov es,ax
+    mov cx,64
+    rep movsw
+    jmp short .success
+
+.write_half:
+    ; WRITE: caller DMA -> BIOS buffer, retaining the opposite half.
+    ; Preserve CHS across the 128-byte memory copy.
+    push cx
+    push dx
+    mov si,[dma_off]
+    mov di,fdc2d_buffer
+    add di,bx
+    mov ax,[dma_seg]
+    mov ds,ax
+    mov cx,64
+    rep movsw
+    pop dx
+    pop cx
+    push cs
+    pop ds
+    mov al,[cur_disk]
+    call fdc2d_write
+    jc .error
+.success:
+    xor al,al               ; CP/M-86 success
+    jmp short .done
+.error:
+    mov al,1                ; CP/M-86 disk error
+.done:
+    pop es
+    pop ds
+    pop bp
+    pop di
+    pop si
+    pop dx
+    pop cx
+    pop bx
     ret
 
 SECTRAN:
