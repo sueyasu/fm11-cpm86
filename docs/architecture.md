@@ -55,17 +55,28 @@ DH=head, CL=physical-sector (1-based); CF reports success/failure.
 The implementation checks DMA terminal count and FDC completion status,
 and masks CH0 on return. DMA CH0 is owned exclusively during the call.
 
-**Limitations:** This is preliminary hardware transport, not yet called
-by CP/M `READ`/`WRITE`.  The emulator currently models Mini-FDC drive
-0 only; other drive numbers fail explicitly.  No retry, media change
-handling or 128-byte deblocking is implemented.  Actual timing and
-status behavior must be checked on hardware.  The DMA bounce-buffer
-address is derived from CS and rejected if it crosses a 64 KiB page;
-an IPL must establish the final resident segment correctly.
+**Logical I/O:** CP/M-86 `READ` and `WRITE` now use 128-byte
+records, numbering 0..31 on each logical side-track (0..79).  The
+logical-to-physical mapping is cylinder = track / 2, head = track % 2,
+sector = record / 2 + 1, half-sector = record % 2.  A read transfers
+the selected half of `fdc2d_buffer` to the caller's DMA segment:offset.
+A write always reads the full 256-byte sector first, replaces the
+selected half with the caller's 128-byte record, and writes the full
+sector back.  This preserves the other 128-byte record without a
+dirty-sector cache or deferred flush.  Both operations return AL=0 on
+success and AL=1 on error.
 
-Next implement CP/M record-to-CHS conversion, read-modify-write
-deblocking, DMA buffer coherency and physical-sector tests before
-enabling BDOS disk reads and writes.
+**Limitations:** Only Mini-FDC drive 0 is supported by the current
+emulator; attempts to perform CP/M disk I/O on drives B:..D: are
+rejected, despite the provisional DPH entries.  Each record write
+performs a physical read and write.  No retry, media-change detection,
+or real-hardware timing validation is implemented.  The bounce buffer
+is checked against the 8237 64 KiB page boundary, and the caller DMA
+offset is checked for 128-byte segment wrapping.  An IPL must
+establish the final resident segment and validate memory ownership.
+
+Next implement 2D disk boot loading and end-to-end emulator tests,
+then extend the controller for additional drive units and 2HD media.
 
 ## Known emulator integration questions
 
