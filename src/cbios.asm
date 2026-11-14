@@ -190,5 +190,5 @@ mrt:
     db 1
     dw 0x0800,0x7800
 
-; Use the NASM section base ($) for an absolute, assembly-time size.
+; Pad to the fixed 0x1900-byte CBIOS image size.
 times BIOS_SIZE - ($ - $) db 0
