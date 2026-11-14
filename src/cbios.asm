@@ -197,6 +197,154 @@ cur_track dw 0
 cur_sector dw 0
 dma_off dw 0x80
 dma_seg dw 0
+; ----------------------------------------------------------------------
+; 2D physical-sector transport (256 bytes), preliminary direct 8088 path.
+;
+; Entry for both functions:
+;   AL = physical drive (currently 0 only), CH = cylinder (0..39),
+;   DH = head (0..1), CL = physical sector number (1..16).
+;   Fixed DMA buffer = CS:fdc2d_buffer; preserves all general registers.
+; Return CF=0 for one complete 256-byte transfer, CF=1 on error.
+;
+; These are NOT the CP/M-86 128-byte READ/WRITE entry points.  The caller
+; must add side-track/record mapping and read-modify-write deblocking before
+; connecting them to BDOS.  DMA CH0 and Mini FDC are temporarily exclusive.
+; ----------------------------------------------------------------------
+fdc2d_read:
+    mov ah,0x44              ; CH0, single, I/O -> memory
+    jmp fdc2d_transfer
+
+fdc2d_write:
+    mov ah,0x48              ; CH0, single, memory -> I/O
+
+fdc2d_transfer:
+    push ax
+    push bx
+    push cx
+    push dx
+    push si
+    push di
+
+    mov bx,ax                ; BL=drive, BH=8237 mode
+    cmp bl,0                 ; emulator Mini FDC currently selects unit 0
+    jne .bad
+    cmp ch,40
+    jae .bad
+    cmp dh,1
+    ja .bad
+    cmp cl,1
+    jb .bad
+    cmp cl,16
+    ja .bad
+
+    ; Convert the real-mode CS:offset into an 8237 bank:offset address.
+    ; 256-byte transfer must not cross a 64 KiB DMA page boundary.
+    mov ax,cs
+    mov si,16
+    mul si                   ; DX:AX = CS * 16
+    add ax,fdc2d_buffer
+    adc dx,0
+    cmp ax,0xff00
+    ja .bad
+    mov si,ax                ; 16-bit DMA address
+    mov di,dx                ; DMA bank (bits 16..19)
+
+    mov dx,0x1a             ; mask DMA channel 0 while programming
+    mov al,4
+    out dx,al
+    mov dx,0x1c             ; reset 8237 address/count flip-flop
+    xor al,al
+    out dx,al
+
+    mov dx,0x10             ; CH0 address, low byte then high byte
+    mov ax,si
+    out dx,al
+    mov al,ah
+    out dx,al
+
+    mov dx,0x11             ; CH0 terminal count = 256 - 1
+    mov al,0xff
+    out dx,al
+    xor al,al
+    out dx,al
+
+    mov dx,0x20             ; CH0 DMA bank
+    mov ax,di
+    out dx,al
+    mov dx,0x1b             ; transfer direction, CH0 single mode
+    mov al,bh
+    out dx,al
+    mov dx,0x18             ; discard any previous terminal-count latch
+    in al,dx
+
+    mov dx,0xfd19           ; FDC track
+    mov al,ch
+    out dx,al
+    inc dx                  ; FD1A: sector
+    mov al,cl
+    out dx,al
+    mov dx,0xfd1c           ; FD1C: side
+    mov al,dh
+    out dx,al
+    inc dx                  ; FD1D: physical drive
+    mov al,bl
+    out dx,al
+
+    mov dx,0x1a             ; unmask CH0
+    xor al,al
+    out dx,al
+    mov dx,0xfd18
+    mov al,0x80
+    cmp bh,0x44
+    je .start
+    mov al,0xa0
+.start:
+    out dx,al
+
+    ; Poll until FDC no longer indicates a transfer in progress.
+    ; Fail closed on controller error and on a bounded poll timeout.
+    mov cx,0xffff
+.poll:
+    in al,dx
+    test al,0x10            ; Mini FDC error
+    jnz .fail
+    test al,0x02            ; transfer in progress
+    jz .status_done
+    loop .poll
+    jmp .fail
+
+.status_done:
+    or al,al                ; success requires status = 0
+    jnz .fail
+    mov dx,0x18
+    in al,dx                ; check 8237 CH0 terminal-count flag
+    test al,1
+    jz .fail
+    clc
+    jmp .finish
+.fail:
+    stc
+.finish:
+    pushf
+    mov dx,0x1a             ; leave DMA CH0 masked
+    mov al,4
+    out dx,al
+    popf
+    jmp .restore
+.bad:
+    stc
+.restore:
+    pop di
+    pop si
+    pop dx
+    pop cx
+    pop bx
+    pop ax
+    ret
+
+; DMA bounce buffer, never exposed as a logical CP/M record.
+fdc2d_buffer: times 256 db 0
+
 ; CP/M-86 disk parameter headers.  Four independent 2D drives are
 ; advertised at A:..D:.  Each DPH is 16 bytes, with private CSV/ALV.
 ; See docs/architecture.md for the provisional 2D filesystem layout.
