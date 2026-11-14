@@ -4,7 +4,7 @@ PYTHON ?= python3
 BUILD := build
 CPM86_CORE ?= external/system/cpm86_core.bin
 
-.PHONY: all check-tools check-core bios rom check test clean
+.PHONY: all check-tools check-core bios rom diag check test clean
 all: bios rom check
 
 check-tools:
@@ -20,13 +20,18 @@ $(BUILD)/cbios.bin: src/cbios.asm | $(BUILD)
 $(BUILD)/bootrom.bin: src/bootrom.asm | $(BUILD)
 	$(NASM) -f bin $< -o $@
 
+$(BUILD)/fdc2d_diag.bin: src/fdc2d_diag.asm | $(BUILD)
+	$(NASM) -f bin $< -o $@
+
 bios: $(BUILD)/cbios.bin
 rom: $(BUILD)/bootrom.bin
+diag: $(BUILD)/fdc2d_diag.bin
 
 check: $(BUILD)/cbios.bin $(BUILD)/bootrom.bin
 	$(PYTHON) tests/check_layout.py $(BUILD)/cbios.bin $(BUILD)/bootrom.bin
 
-test: check
+test: check diag
+	$(PYTHON) tests/check_diag.py $(BUILD)/fdc2d_diag.bin
 
 check-core:
 	@test -f "$(CPM86_CORE)" || { echo "missing external CP/M-86 core: $(CPM86_CORE)" >&2; exit 1; }
