@@ -4,7 +4,7 @@ PYTHON ?= python3
 BUILD := build
 CPM86_CORE ?= external/system/cpm86_core.bin
 
-.PHONY: all check-tools check-core bios rom diag check test clean
+.PHONY: all check-tools check-core bios rom diag cbios-diag check test clean
 all: bios rom check
 
 check-tools:
@@ -23,6 +23,14 @@ $(BUILD)/bootrom.bin: src/bootrom.asm | $(BUILD)
 $(BUILD)/fdc2d_diag.bin: src/fdc2d_diag.asm | $(BUILD)
 	$(NASM) -f bin $< -o $@
 
+$(BUILD)/cbios_diag.bin: src/cbios_diag.asm | $(BUILD)
+	$(NASM) -f bin $< -o $@
+
+$(BUILD)/cbios_diag_2d.img: $(BUILD)/cbios.bin tests/build_cbios_diag_disk.py | $(BUILD)
+	$(PYTHON) tests/build_cbios_diag_disk.py $(BUILD)/cbios.bin $@
+
+cbios-diag: $(BUILD)/cbios_diag.bin $(BUILD)/cbios_diag_2d.img
+
 bios: $(BUILD)/cbios.bin
 rom: $(BUILD)/bootrom.bin
 diag: $(BUILD)/fdc2d_diag.bin
@@ -30,8 +38,9 @@ diag: $(BUILD)/fdc2d_diag.bin
 check: $(BUILD)/cbios.bin $(BUILD)/bootrom.bin
 	$(PYTHON) tests/check_layout.py $(BUILD)/cbios.bin $(BUILD)/bootrom.bin
 
-test: check diag
+test: check diag cbios-diag
 	$(PYTHON) tests/check_diag.py $(BUILD)/fdc2d_diag.bin
+	$(PYTHON) tests/check_cbios_diag.py $(BUILD)/cbios_diag.bin $(BUILD)/cbios_diag_2d.img $(BUILD)/cbios.bin
 
 check-core:
 	@test -f "$(CPM86_CORE)" || { echo "missing external CP/M-86 core: $(CPM86_CORE)" >&2; exit 1; }
