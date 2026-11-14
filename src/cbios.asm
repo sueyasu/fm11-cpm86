@@ -138,7 +138,19 @@ HOME:
     ret
 
 SELDSK:
-    xor bx,bx             ; no drives present until FM-11 FDC port is added
+    ; CL = logical drive (A:..D: are 2D units 0..3).
+    ; DL bit 0 = 0 for first login, 1 for an already logged-in disk.
+    ; DPH/DPB describes the media, but READ/WRITE still report an error
+    ; until the direct FDC/8237 transport has been implemented.
+    xor bx,bx
+    cmp cl,4
+    jae .absent
+    xor ch,ch
+    mov bx,cx
+    shl bx,1
+    mov bx,[dph_table+bx]
+    mov [cur_disk],cl
+.absent:
     ret
 
 SETTRK:
@@ -185,6 +197,47 @@ cur_track dw 0
 cur_sector dw 0
 dma_off dw 0x80
 dma_seg dw 0
+; CP/M-86 disk parameter headers.  Four independent 2D drives are
+; advertised at A:..D:.  Each DPH is 16 bytes, with private CSV/ALV.
+; See docs/architecture.md for the provisional 2D filesystem layout.
+dph_table:
+    dw dph0,dph1,dph2,dph3
+
+dph0:
+    dw 0,0,0,0
+    dw dirbuf,dpb_2d,csv0,alv0
+dph1:
+    dw 0,0,0,0
+    dw dirbuf,dpb_2d,csv1,alv1
+dph2:
+    dw 0,0,0,0
+    dw dirbuf,dpb_2d,csv2,alv2
+dph3:
+    dw 0,0,0,0
+    dw dirbuf,dpb_2d,csv3,alv3
+
+; 40 cylinders * 2 sides * 16 sectors * 256 bytes = 320 KiB.
+; One CP/M logical track is one side: 32 * 128-byte records.
+; Reserve two side-tracks; 78 * 4 KiB / 2 KiB = 156 blocks.
+dpb_2d:
+    dw 32                 ; SPT: 128-byte records per side-track
+    db 4,15,1             ; BSH, BLM, EXM (DSM < 256, 2 KiB blocks)
+    dw 155                ; DSM: blocks 0..155
+    dw 63                 ; DRM: 64 directory entries
+    db 0x80,0             ; AL0/AL1: one directory block reserved
+    dw 16                 ; CKS: (DRM+1)/4
+    dw 2                  ; OFF: two reserved side-tracks
+
+dirbuf: times 128 db 0
+csv0: times 16 db 0
+csv1: times 16 db 0
+csv2: times 16 db 0
+csv3: times 16 db 0
+alv0: times 20 db 0
+alv1: times 20 db 0
+alv2: times 20 db 0
+alv3: times 20 db 0
+
 ; Memory region table is provisional and must be validated before boot.
 mrt:
     db 1
