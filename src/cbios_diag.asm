@@ -16,6 +16,7 @@ WRITEBUF    equ 0x6400
 CHECKBUF    equ 0x6600
 CHECKHALF   equ 0x6680
 DIRTY_FLAG  equ 0x7000
+BIOS_GATE   equ 0x7100
 
 ; 21 near jump vectors at 0000:2500 (three bytes each).
 BIOS_SELDSK equ BIOS_BASE+9*3
@@ -56,6 +57,11 @@ entry:
     mov ds,ax
     mov es,ax
     mov byte [DIRTY_FLAG],0
+    ; RAM trampoline: CALL BX (FF D3), RETF (CB). The BIOS uses
+    ; near RET, so a direct far CALL from ROM would corrupt control flow.
+    mov byte [BIOS_GATE],0xFF
+    mov byte [BIOS_GATE+1],0xD3
+    mov byte [BIOS_GATE+2],0xCB
     mov dx,SER_STATUS
     mov al,0x4E
     out dx,al
@@ -110,20 +116,26 @@ entry:
     ; the as-yet-unloaded CCP/BDOS core.
     xor cx,cx
     xor dx,dx
-    call 0x0000:BIOS_SELDSK
+    mov bx,BIOS_SELDSK
+    call bios_call
     or bx,bx
     FAIL_Z
     mov cx,2                ; track 2 = cylinder 1, side 0
-    call 0x0000:BIOS_SETTRK
+    mov bx,BIOS_SETTRK
+    call bios_call
     xor cx,cx               ; DMA segment 0
-    call 0x0000:BIOS_SETDMAB
+    mov bx,BIOS_SETDMAB
+    call bios_call
 
     ; Read logical record 0 into RECORD0.
     xor cx,cx
-    call 0x0000:BIOS_SETSEC
+    mov bx,BIOS_SETSEC
+    call bios_call
     mov cx,RECORD0
-    call 0x0000:BIOS_SETDMA
-    call 0x0000:BIOS_READ
+    mov bx,BIOS_SETDMA
+    call bios_call
+    mov bx,BIOS_READ
+    call bios_call
     or al,al
     FAIL_NZ
     mov si,RECORD0
@@ -133,10 +145,13 @@ entry:
 
     ; Read logical record 1; verify the other 128-byte half.
     mov cx,1
-    call 0x0000:BIOS_SETSEC
+    mov bx,BIOS_SETSEC
+    call bios_call
     mov cx,RECORD1
-    call 0x0000:BIOS_SETDMA
-    call 0x0000:BIOS_READ
+    mov bx,BIOS_SETDMA
+    call bios_call
+    mov bx,BIOS_READ
+    call bios_call
     or al,al
     FAIL_NZ
     mov si,RECORD1
@@ -162,19 +177,25 @@ entry:
     ; attempt to restore the original first half after this point.
     mov byte [DIRTY_FLAG],1
     xor cx,cx
-    call 0x0000:BIOS_SETSEC
+    mov bx,BIOS_SETSEC
+    call bios_call
     mov cx,WRITEBUF
-    call 0x0000:BIOS_SETDMA
-    call 0x0000:BIOS_WRITE
+    mov bx,BIOS_SETDMA
+    call bios_call
+    mov bx,BIOS_WRITE
+    call bios_call
     or al,al
     FAIL_NZ
 
     ; Read record 0 back into a separate location and compare.
     xor cx,cx
-    call 0x0000:BIOS_SETSEC
+    mov bx,BIOS_SETSEC
+    call bios_call
     mov cx,CHECKBUF
-    call 0x0000:BIOS_SETDMA
-    call 0x0000:BIOS_READ
+    mov bx,BIOS_SETDMA
+    call bios_call
+    mov bx,BIOS_READ
+    call bios_call
     or al,al
     FAIL_NZ
     mov si,CHECKBUF
@@ -184,10 +205,13 @@ entry:
 
     ; Verify READ/MODIFY/WRITE preserved the other half of the sector.
     mov cx,1
-    call 0x0000:BIOS_SETSEC
+    mov bx,BIOS_SETSEC
+    call bios_call
     mov cx,CHECKHALF
-    call 0x0000:BIOS_SETDMA
-    call 0x0000:BIOS_READ
+    mov bx,BIOS_SETDMA
+    call bios_call
+    mov bx,BIOS_READ
+    call bios_call
     or al,al
     FAIL_NZ
     mov si,CHECKHALF
@@ -223,14 +247,33 @@ stop:
     hlt
     jmp stop
 
+; Invoke BX=CBIOS vector via RAM gate in segment 0000h.
+; The gate executes near CALL BX, then RETF to this ROM.  It preserves
+; all registers except those modified by the called BIOS function.
+bios_call:
+    mov ax,cs
+    push ax                 ; far return CS = ROM segment FF00h
+    mov ax,.returned
+    push ax                 ; far return IP in ROM
+    xor ax,ax
+    push ax                 ; target CS = 0000h
+    mov ax,BIOS_GATE
+    push ax                 ; target IP = gate
+    retf
+.returned:
+    ret
+
 ; Write the saved original record 0 back to the scratch sector.
 ; CF and AL are returned from the CBIOS WRITE operation.
 restore_sector:
     xor cx,cx
-    call 0x0000:BIOS_SETSEC
+    mov bx,BIOS_SETSEC
+    call bios_call
     mov cx,RECORD0
-    call 0x0000:BIOS_SETDMA
-    call 0x0000:BIOS_WRITE
+    mov bx,BIOS_SETDMA
+    call bios_call
+    mov bx,BIOS_WRITE
+    call bios_call
     or al,al
     jnz .bad
     clc
