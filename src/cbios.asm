@@ -189,4 +189,4 @@ mrt:
     db 1
     dw 0x0800,0x7800
 
-times BIOS_SIZE-($-$) db 0
+times (0x2500 + BIOS_SIZE - $) db 0
