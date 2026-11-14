@@ -93,7 +93,11 @@ and start `fm11-sdl` with:
 fm11-sdl --8088-rom build/fdc2d_diag.bin
 ```
 
-Use the existing PTY/serial output facility to observe the diagnostic.
+The diagnostic ROM waits for one received serial byte before printing anything.
+After launching fm11-sdl, note the `Serial PTY: /dev/pts/N` path printed
+in its terminal. Open a second terminal, connect with
+`screen /dev/pts/N` (or `picocom`), then press any key to start
+the diagnostic. This prevents startup output from being missed.
 The ROM reads physical cylinder 0, head 0, sector 1 (256 bytes) through
 8237 DMA channel 0 into physical RAM 0000:2000. It checks FDC completion
 and DMA terminal count, then prints the first 16 bytes in hexadecimal.
