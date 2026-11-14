@@ -191,4 +191,4 @@ mrt:
     dw 0x0800,0x7800
 
 ; Pad to the fixed 0x1900-byte CBIOS image size.
-times BIOS_SIZE - ($ - $) db 0
+times BIOS_SIZE - ($ - $$) db 0
