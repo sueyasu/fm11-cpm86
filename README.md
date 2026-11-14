@@ -117,6 +117,58 @@ not sufficient for a successful floppy-read test. `make test` performs
 static ROM checks only; a successful test is not a claim of emulated or
 physical I/O success.
 
+## CBIOS READ/WRITE integration diagnostic
+
+Build a **dedicated disposable 2D test image** and 8088 diagnostic ROM:
+
+```sh
+make cbios-diag
+make test
+```
+
+Outputs: `build/cbios_diag.bin` (4096-byte ROM) and
+`build/cbios_diag_2d.img` (327680-byte raw 2D floppy). Never use
+a disk containing valuable data for this test. The generated image
+contains the actual `build/cbios.bin` at C0/H0/S2 onward, followed
+by a scratch sector at C1/H0/S1. The diagnostic ROM loads all 25
+physical sectors (0x1900 bytes) of the real CBIOS to RAM
+0000:2500, then calls its existing 21-entry vector table.
+It does **not** enter the unfinished INIT/WBOOT or require the
+external CP/M-86 CCP/BDOS core.
+
+With the 8088 selected as the main CPU in `/etc/fm11emu.conf`,
+start the SDL frontend using your normal 6809 main-board ROM (required
+for SDL floppy mounting) and the dedicated raw image:
+
+```sh
+fm11-sdl --main-rom /path/to/boot6809.bin \\
+  --8088-rom build/cbios_diag.bin \\
+  --floppy2d build/cbios_diag_2d.img --floppy-drive 0
+```
+
+The ROM waits for one incoming serial byte before it starts: attach
+`screen /dev/pts/N` to the `Serial PTY:` announced by fm11-sdl,
+and press any key.
+
+Expected serial output:
+
+```text
+CBIOS 128-byte record test
+CBIOS loaded from 2D disk
+PASS: records 0 and 1 read
+PASS: WRITE, RMW, verify, restore
+```
+
+The ROM selects drive A:, track 2 (physical C1/H0), and reads logical
+records 0 and 1 into distinct RAM buffers. It checks both expected
+byte patterns. It then writes a third pattern into record 0, reads
+it back, confirms that record 1 was preserved, and restores the
+original record 0. A failed write or restore can still leave the
+disposable scratch sector modified. This is a functional test of
+CBIOS `READ`/`WRITE`, not just direct FDC register access. The
+serial output, not the static `make test` result, establishes whether
+the emulated FDC, DMA, and CBIOS work together.
+
 ## Next milestones
 
 1. Confirm 8088 ROM reset and serial console on `fm11-sdl`/romtrace.
