@@ -68,6 +68,8 @@ INIT:
     out dx,al
     mov al,0x37           ; receive/transmit enabled; no interrupt reliance
     out dx,al
+    mov byte [dir_diag_count],0
+    mov byte [dir_diag_track_count],0
     mov word [cur_track],0
     mov word [cur_sector],0
     mov word [dma_off],0x0080
@@ -163,6 +165,7 @@ SELDSK:
 
 SETTRK:
     mov [cur_track],cx
+    call diag_settrk
     ret
 
 SETSEC:
@@ -281,6 +284,9 @@ rw_2d:
 .error:
     mov al,1                ; CP/M-86 disk error
 .done:
+    ; Emit bounded diagnostics before restoring caller context.  For a
+    ; successful READ ES still points to the BDOS destination buffer.
+    call diag_dir_read
     pop es
     pop ds
     pop bp
@@ -290,6 +296,150 @@ rw_2d:
     pop cx
     pop bx
     ret
+
+; ----------------------------------------------------------------------
+; Temporary CP/M directory diagnostics. Serial output is bounded to the
+; first 8 SETTRK calls and first 8 READs of side-track 4 (C2/H0).
+; Preserve all caller registers/flags, including AL (BDOS I/O status).
+; The READ data dump is from the *actual DMA destination* ES:[dma_off],
+; not just from the physical-sector bounce buffer.
+; ----------------------------------------------------------------------
+diag_settrk:
+    pushf
+    push ax
+    push dx
+    push si
+    push ds
+    push cs
+    pop ds
+    cmp byte [dir_diag_track_count],8
+    jae .end
+    inc byte [dir_diag_track_count]
+    mov si,diag_track_msg
+    call serial_puts
+    mov ax,[cur_track]
+    call diag_hex_word
+    mov si,diag_crlf
+    call serial_puts
+.end:
+    pop ds
+    pop si
+    pop dx
+    pop ax
+    popf
+    ret
+
+diag_dir_read:
+    pushf
+    push ax
+    push bx
+    push cx
+    push dx
+    push si
+    push di
+    push ds
+    push es
+    ; BP bit 8 records the original READ/WRITE direction.
+    test bp,0x0100
+    jnz .finish
+    push cs
+    pop ds
+    cmp word [cur_track],4
+    jne .finish
+    cmp byte [dir_diag_count],8
+    jae .finish
+    inc byte [dir_diag_count]
+    mov bl,al              ; save READ status (0=success, 1=error)
+    mov si,diag_read_msg
+    call serial_puts
+    mov ax,[cur_track]
+    call diag_hex_word
+    mov si,diag_sec_msg
+    call serial_puts
+    mov ax,[cur_sector]
+    call diag_hex_word
+    mov si,diag_dma_msg
+    call serial_puts
+    mov ax,[dma_seg]
+    call diag_hex_word
+    mov al,':'
+    call serial_putc
+    mov ax,[dma_off]
+    call diag_hex_word
+    mov si,diag_status_msg
+    call serial_puts
+    mov al,bl
+    call diag_hex_byte
+    test bl,bl
+    jnz .newline
+    mov si,diag_data_msg
+    call serial_puts
+    mov ax,[dma_seg]
+    mov es,ax
+    mov di,[dma_off]
+    mov cx,16
+.dump:
+    mov al,[es:di]
+    call diag_hex_byte
+    mov al,' '
+    call serial_putc
+    inc di
+    loop .dump
+.newline:
+    mov si,diag_crlf
+    call serial_puts
+.finish:
+    pop es
+    pop ds
+    pop di
+    pop si
+    pop dx
+    pop cx
+    pop bx
+    pop ax
+    popf
+    ret
+
+; AX=word; AL=byte. Routines do not change caller-visible registers.
+diag_hex_word:
+    push ax
+    mov al,ah
+    call diag_hex_byte
+    pop ax
+    call diag_hex_byte
+    ret
+
+diag_hex_byte:
+    push ax
+    mov ah,al
+    shr al,1
+    shr al,1
+    shr al,1
+    shr al,1
+    call diag_hex_nibble
+    mov al,ah
+    and al,0x0F
+    call diag_hex_nibble
+    pop ax
+    ret
+
+diag_hex_nibble:
+    and al,0x0F
+    cmp al,10
+    jb .digit
+    add al,'A'-10
+    jmp serial_putc
+.digit:
+    add al,'0'
+    jmp serial_putc
+
+diag_track_msg db 'DBG SETTRK=',0
+diag_read_msg db 'DBG READ T=',0
+diag_sec_msg db ' S=',0
+diag_dma_msg db ' DMA=',0
+diag_status_msg db ' AL=',0
+diag_data_msg db ' DATA=',0
+diag_crlf db 13,10,0
 
 SECTRAN:
     mov bx,cx             ; identity translation
@@ -310,6 +460,8 @@ SETIOBF:
 hello db 'FM-11 CP/M-86 BIOS: serial initialized',13,10,0
 cur_disk db 0
 iobyte db 0
+dir_diag_count db 0
+dir_diag_track_count db 0
 cur_track dw 0
 cur_sector dw 0
 dma_off dw 0x80
