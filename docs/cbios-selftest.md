@@ -87,11 +87,16 @@ make selftest
 When the track 80 check fails, the extended output is:
 
 ```text
-FAIL READ track=80 returned AX=xxxx BX=xxxx FLAGS=xxxx PATH=xx DONE_AX=xxxx
+FAIL READ track=80 returned AX=xxxx ENTRY=xx DS=xxxx BX=xxxx FLAGS=xxxx PATH=xx DONE_AX=xxxx
 ```
 
 Fields:
 - `AX`: the caller-visible return status.
+- `ENTRY`: CS-relative stage marker: `00` = READ entry not reached,
+  `01` = READ entered but common entry not reached, `02` = common
+  entry reached but prologue incomplete, `03` = prologue completed.
+- `DS`: segment recorded with a CS override after segment setup;
+  expected `0400`. This value is independent of the current DS.
 - `BX`: the value of `cur_track` actually loaded inside READ before CMP.
 - `FLAGS`: saved immediately after `CMP BX,80` (CF=bit 0, ZF=bit 6).
   For BX=0050h, expected CF=0 and ZF=1.
@@ -109,3 +114,7 @@ Interpreting an anomaly: `BX=0050 FLAGS=004x PATH=03` would implicate
 the conditional branch or address decoding; `PATH=02 DONE_AX=0001
 AX=0000` would implicate stack/return or post-return behavior.
 Any different BX means the track state changed between caller and READ.
+
+Unlike the earlier BX/FLAGS/PATH fields, ENTRY and DS are recorded with
+explicit CS segment overrides. This distinguishes a CALL/JMP/prologue
+problem from an incorrect DS base. The normal CBIOS image is unchanged.
