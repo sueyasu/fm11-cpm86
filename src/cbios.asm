@@ -1,7 +1,7 @@
-; FM-11 CP/M-86 v1.1 initial CBIOS scaffold.
+; FM-11 CP/M-86 v1.1 experimental CBIOS.
 ; Resident core ABI and vector layout originate from sueyasu/pc98_cpm86.
-; Only the 8251 console is implemented. Disk services intentionally fail.
-; This is NOT a bootable BIOS yet; do not mistake the provisional DPH for media.
+; 8251 serial console and Mini-FDC 2D 128-byte READ/WRITE are implemented.
+; IPL/cold-boot and file-level CP/M-86 compatibility are not yet verified.
 cpu 8086
 bits 16
 org 0x2500
@@ -140,8 +140,8 @@ HOME:
 SELDSK:
     ; CL = logical drive (A:..D: are 2D units 0..3).
     ; DL bit 0 = 0 for first login, 1 for an already logged-in disk.
-    ; DPH/DPB describes the media, but READ/WRITE still report an error
-    ; until the direct FDC/8237 transport has been implemented.
+    ; The current emulator supports physical Mini-FDC unit 0 for I/O.
+    ; DPH entries for B:..D: remain provisional.
     xor bx,bx
     cmp cl,4
     jae .absent
@@ -315,9 +315,8 @@ dma_seg dw 0
 ;   Fixed DMA buffer = CS:fdc2d_buffer; preserves all general registers.
 ; Return CF=0 for one complete 256-byte transfer, CF=1 on error.
 ;
-; These are NOT the CP/M-86 128-byte READ/WRITE entry points.  The caller
-; must add side-track/record mapping and read-modify-write deblocking before
-; connecting them to BDOS.  DMA CH0 and Mini FDC are temporarily exclusive.
+; These are physical 256-byte transfers used by the CP/M-86
+; READ/WRITE entries above. DMA CH0 and Mini FDC are temporarily exclusive.
 ; ----------------------------------------------------------------------
 fdc2d_read:
     mov ah,0x44              ; CH0, single, I/O -> memory
