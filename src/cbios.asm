@@ -71,6 +71,8 @@ INIT:
     mov byte [dir_diag_count],0
     mov byte [dir_diag_track_count],0
     mov byte [input_diag_count],0
+    mov byte [output_diag_count],0
+    mov byte [output_diag_active],0
     mov word [cur_track],0
     mov word [cur_sector],0
     mov word [dma_off],0x0080
@@ -89,6 +91,7 @@ INIT:
     jmp 0x0000           ; CCP cold entry in resident segment
 
 WBOOT:
+    call diag_wboot
     jmp 0x0006           ; provisional: disk reload not implemented
 
 CONST:
@@ -117,6 +120,10 @@ CONIN:
     ret
 
 CONOUT:
+    mov al,cl
+    call diag_conout_byte
+    call serial_putc
+    ret
 LISTOUT:
 PUNCH:
     mov al,cl
@@ -319,6 +326,57 @@ rw_2d:
 ; ----------------------------------------------------------------------
 ; Trace the first 64 bytes returned to CCP by CONIN, including CR/LF.
 ; Uses direct serial output; preserves AL, all other registers and flags.
+; Keep a bounded trace of actual CCP output after Enter.  The
+; diagnostic's own serial_puts does not call the CONOUT BIOS vector.
+; This leaves AL/AX, BX, CX, DX, SI, DS, flags untouched.
+diag_conout_byte:
+    pushf
+    push ax
+    push bx
+    push dx
+    push si
+    push ds
+    push cs
+    pop ds
+    cmp byte [output_diag_active],0
+    je .finish
+    cmp byte [output_diag_count],48
+    jae .finish
+    inc byte [output_diag_count]
+    mov bl,al
+    mov si,diag_output_msg
+    call serial_puts
+    mov al,bl
+    call diag_hex_byte
+    mov si,diag_crlf
+    call serial_puts
+.finish:
+    pop ds
+    pop si
+    pop dx
+    pop bx
+    pop ax
+    popf
+    ret
+
+; A marker detects CCP/BDOS calling the warm-boot BIOS vector.
+diag_wboot:
+    pushf
+    push ax
+    push dx
+    push si
+    push ds
+    push cs
+    pop ds
+    mov si,diag_wboot_msg
+    call serial_puts
+    pop ds
+    pop si
+    pop dx
+    pop ax
+    popf
+    ret
+
 diag_conin_byte:
     pushf
     push ax
@@ -336,6 +394,11 @@ diag_conin_byte:
     call serial_puts
     mov al,bl
     call diag_hex_byte
+    cmp bl,0x0D
+    jne .not_cr
+    mov byte [output_diag_active],1
+    mov byte [output_diag_count],0
+.not_cr:
     mov si,diag_crlf
     call serial_puts
 .done:
@@ -483,6 +546,8 @@ diag_hex_nibble:
     jmp serial_putc
 
 diag_input_msg db 'DBG CONIN=',0
+diag_output_msg db 'DBG CONOUT=',0
+diag_wboot_msg db 'DBG WBOOT entered',13,10,0
 diag_track_msg db 'DBG SETTRK=',0
 diag_read_msg db 'DBG READ T=',0
 diag_sec_msg db ' S=',0
@@ -513,6 +578,8 @@ iobyte db 0
 dir_diag_count db 0
 dir_diag_track_count db 0
 input_diag_count db 0
+output_diag_count db 0
+output_diag_active db 0
 cur_track dw 0
 cur_sector dw 0
 dma_off dw 0x80
