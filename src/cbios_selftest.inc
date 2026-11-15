@@ -142,15 +142,21 @@ selftest_entry:
     xor cx,cx
     call SETSEC
     call READ
-    cmp al,1
-    ST_CHECK_EQ
+    cmp ax,1
+    je .invalid_track_ok
+    mov si,st_bad_track
+    jmp st_fail_ax
+.invalid_track_ok:
     mov cx,4
     call SETTRK
     mov cx,32
     call SETSEC
     call READ
-    cmp al,1
-    ST_CHECK_EQ
+    cmp ax,1
+    je .invalid_record_ok
+    mov si,st_bad_record
+    jmp st_fail_ax
+.invalid_record_ok:
     mov si,st_limits_ok
     call serial_puts
 
@@ -257,6 +263,25 @@ selftest_entry:
     call serial_puts
     jmp st_halt
 
+; Report the actual returned status (AX) and the failing condition.
+; The original status is printed before any serial routine overwrites AX.
+st_fail_ax:
+    push ax
+    call serial_puts
+    pop ax
+    call st_hex_word
+    mov si,st_crlf
+    call serial_puts
+    jmp st_fail
+
+st_hex_word:
+    push ax
+    mov al,ah
+    call st_hex_byte
+    pop ax
+    call st_hex_byte
+    ret
+
 st_restore_failed:
     mov si,st_write_bad
     call serial_puts
@@ -337,6 +362,8 @@ st_io_ok db 'PASS GETIOBF/SETIOBF',13,10,0
 st_dph_ok db 'PASS SELDSK/DPH/DPB',13,10,0
 st_set_ok db 'PASS SETTRK/HOME/SETSEC/SETDMA/SETDMAB/SECTRAN/GETSEGT',13,10,0
 st_limits_ok db 'PASS READ invalid track/record',13,10,0
+st_bad_track db 'FAIL READ track=80 returned AX=',0
+st_bad_record db 'FAIL READ record=32 returned AX=',0
 st_read_ok db 'PASS READ directory ASM86.CMD',13,10,0
 st_key_prompt db 'Press one key for CONIN test: ',0
 st_key_ok db 13,10,'PASS CONIN',13,10,0
