@@ -159,6 +159,15 @@ PASS: records 0 and 1 read
 PASS: WRITE, RMW, verify, restore
 ```
 
+The diagnostic now prints `STEP:` markers around the first CBIOS
+calls, including `SELDSK` and the two logical `READ` operations.
+If `fm11-sdl` reports an invalid opcode, capture the last printed
+`STEP:` marker. The cross-segment call gate resides at 0000:7100
+and uses only 8086 PUSH/RET instructions, avoiding the previous
+FF-group indirect CALL. An emulator exception alone does not prove a
+CBIOS disk failure; the step markers distinguish dispatch failure from
+the actual FDC/record transfer.
+
 The ROM selects drive A:, track 2 (physical C1/H0), and reads logical
 records 0 and 1 into distinct RAM buffers. It checks both expected
 byte patterns. It then writes a third pattern into record 0, reads
