@@ -63,3 +63,25 @@ compatibility fix rather than a confirmed successful boot.
 The build target checks D88 geometry, sector payload round-trips, exact
 resident placement and preservation of the CP/M filesystem. These
 structural checks do not constitute a runtime boot test.
+
+## Serial diagnostics in the disk IPL
+
+The 512-byte IPL initializes the shared 8251 on ports FD07h (status)
+and FD06h (data), then prints single-character stage markers:
+
+- `I` — entered the disk IPL at `07C0:0000` and initialized serial.
+- `R` — copied the IPL to `0100:0000` and entered the relocated code.
+- `.` — one 256-byte resident sector read succeeded; 62 dots expected.
+- `J` — confirmed the CBIOS E9h vector and about to jump to INIT.
+- `Ecc:hh:ss` — sector-read failure, 8-bit hexadecimal cylinder/head/
+  1-based sector values, for example `E00:00:03`.
+- `V` — loaded CBIOS first vector byte is not E9h.
+
+The `E` / `V` cases append CR/LF and halt. `J` proceeds to the
+CBIOS, so a later CBIOS banner should appear. To avoid consuming the
+first serial character, the IPL does **not** wait for terminal input.
+
+**Connect the serial terminal before starting the original emulator.**
+An early `I` may be lost if the PTY is attached after the IPL begins.
+The output is designed to be compact enough for the 512-byte boot sector,
+rather than provide a verbose interactive diagnostic.
