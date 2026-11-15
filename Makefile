@@ -5,7 +5,7 @@ BUILD := build
 CPM86_CORE ?= external/system/cpm86_core.bin
 EXTERNAL_COMMANDS := $(sort $(wildcard external/commands/*.CMD external/commands/*.cmd))
 
-.PHONY: all check-tools check-core bios rom diag cbios-diag boot selftest check test clean
+.PHONY: all check-tools check-core bios rom diag cbios-diag boot boot-d88 selftest check test clean
 all: bios rom check
 
 check-tools:
@@ -32,11 +32,26 @@ $(BUILD)/bootrom.bin: src/bootrom.asm | $(BUILD)
 $(BUILD)/iplrom.bin: src/iplrom.asm | $(BUILD)
 	$(NASM) -f bin $< -o $@
 
+# 512-byte disk IPL, distinct from the 4-KiB reset ROM.
+$(BUILD)/ipl_2d.bin: src/ipl_2d.asm | $(BUILD)
+	$(NASM) -f bin $< -o $@
+
 $(BUILD)/fm11_cpm86_2d.img: $(BUILD)/cbios.bin tests/build_boot_2d.py $(CPM86_CORE) $(EXTERNAL_COMMANDS) | $(BUILD)
 	$(PYTHON) tests/build_boot_2d.py --core $(CPM86_CORE) --cbios $(BUILD)/cbios.bin \
 		$(foreach f,$(EXTERNAL_COMMANDS),--file $(f)) $@
 
 boot: check-core $(BUILD)/iplrom.bin $(BUILD)/fm11_cpm86_2d.img
+
+$(BUILD)/fm11_cpm86_boot_2d.d88: $(BUILD)/fm11_cpm86_2d.img $(BUILD)/ipl_2d.bin tests/build_boot_d88.py | $(BUILD)
+	$(PYTHON) tests/build_boot_d88.py --raw $(BUILD)/fm11_cpm86_2d.img \
+		--ipl $(BUILD)/ipl_2d.bin --raw-output $(BUILD)/fm11_cpm86_boot_2d.raw \
+		--output $@
+
+boot-d88: check-core $(BUILD)/fm11_cpm86_boot_2d.d88
+	$(PYTHON) tests/check_boot_d88.py $(BUILD)/fm11_cpm86_2d.img \
+		$(BUILD)/ipl_2d.bin $(BUILD)/fm11_cpm86_boot_2d.d88 \
+		$(BUILD)/fm11_cpm86_boot_2d.raw
+
 
 # Only the disposable copy may be written by the test (last disk record).
 # ASM86.CMD is fixed as the first entry for the READ-data assertion.
