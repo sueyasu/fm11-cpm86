@@ -18,7 +18,9 @@ The existing `pc98_cpm86` resident image has a 0x2500-byte externally
 provided CCP/BDOS core followed by BIOS at offset 2500h, using a 0x1900
 byte BIOS area. This project initially reserves the same offsets and
 retains the CBIOS 21-entry jump table, pending actual FM-11 boot verification.
-The first-stage diagnostic ROM does not enter this resident image.
+The experimental 2D IPL ROM now loads this resident image at segment
+0800h and enters CBIOS INIT at 0800:2500. A usable CCP/BDOS boot is
+not yet verified.
 
 ## FM-11 devices
 
@@ -35,16 +37,17 @@ The first disk-BIOS step now provides DPH/DPB records for A:..D: as four
 independent 2D units. The provisional filesystem parameters are:
 
 - 32 CP/M records (128 bytes each) per logical side-track.
-- 2 KiB allocation blocks; 156 data blocks numbered 0..155.
+- 2 KiB allocation blocks; 152 data blocks numbered 0..151.
 - 64 directory entries (one reserved allocation block).
-- Two reserved side-tracks at the start of the disk.
+- Four reserved side-tracks at the start (two cylinders, 16 KiB) to hold
+  the 0x3E00-byte resident image.
 - Per-drive CSV (16 bytes) and ALV (20 bytes), plus a shared 128-byte DIRBUF.
 
-These parameters describe a proposed CP/M-86 filesystem layout, **not** the
-FM-11 boot-track format. They require verification when an IPL and disk-image
-builder exist. The driver returns errors on READ/WRITE until the direct
-8088 FDC/8237 transport and 256-to-128-byte deblocking are implemented.
-The DPH pointers must not be treated as evidence that media I/O works.
+These parameters match the experimental raw 2D IPL image builder:
+62 consecutive 256-byte sectors are placed at the beginning of the disk,
+and the 64-entry empty CP/M directory starts after four reserved side-tracks.
+The 128-byte READ/WRITE and read-modify-write paths have passed dedicated
+emulator diagnostics. File-level filesystem behavior is not yet verified.
 
 The initial 2D physical-sector transport is now present in `src/cbios.asm`
 as `fdc2d_read` and `fdc2d_write`.  Both use the Mini FDC registers
@@ -75,7 +78,8 @@ is checked against the 8237 64 KiB page boundary, and the caller DMA
 offset is checked for 128-byte segment wrapping.  An IPL must
 establish the final resident segment and validate memory ownership.
 
-Next implement 2D disk boot loading and end-to-end emulator tests,
+The 2D IPL first-stage ROM and image generator are present. Next verify
+actual cold boot through INIT, the CCP/BDOS core, and filesystem access,
 then extend the controller for additional drive units and 2HD media.
 
 ## Known emulator integration questions
