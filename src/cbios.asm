@@ -65,21 +65,11 @@ INIT:
     mov ax,cs
     mov word [BDOS_INT*4+2],ax
     pop ds
-    ; The original FM-11 emulator's 8251 may still be in command mode
-    ; when the disk IPL transfers control here. Synchronize its
-    ; mode/command state before initializing the serial console.
-    ; Use the same sequence as the now-working disk IPL.
-    mov dx,SER_STATUS
-    xor al,al
-    out dx,al
-    out dx,al
-    out dx,al
-    mov al,0x40           ; 8251 internal reset
-    out dx,al
-    mov al,0x4E           ; asynchronous, 8 data bits, no parity, 1 stop
-    out dx,al
-    mov al,0x37           ; enable receive/transmit, reset errors
-    out dx,al
+    ; The IPL has already configured USART0. Do NOT reinitialize it:
+    ; on the original emulator a command write that drops DTR (bit 1)
+    ; calls CNamedPipe::DoClose() and disconnects the active terminal.
+    ; In particular the old 00h/40h reset sequence is unsafe here.
+    ; Leave MODE, CMD and DTR untouched throughout the CBIOS handoff.
     mov word [cur_track],0
     mov word [cur_sector],0
     mov word [dma_off],0x0080
