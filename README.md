@@ -183,8 +183,8 @@ the emulated FDC, DMA, and CBIOS work together.
 
 The new `src/iplrom.asm` reads **62 contiguous physical sectors**
 (256 bytes each) from Mini-FDC drive 0, starting at C0/H0/S1. It
-loads the 0x3E00-byte resident image into segment `0800h`, checks
-the CBIOS jump-vector opcode at `0800:2500`, and transfers to CBIOS
+loads the 0x3E00-byte resident image into segment `0400h`, checks
+the CBIOS jump-vector opcode at `0400:2500`, and transfers to CBIOS
 `INIT`. The resident consists of a separately supplied CP/M-86
 CCP/BDOS core (0x2500 bytes) followed by `build/cbios.bin` (0x1900
 bytes). Neither the proprietary core nor its binaries are committed.
