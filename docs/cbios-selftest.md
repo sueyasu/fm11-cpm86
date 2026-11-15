@@ -87,12 +87,12 @@ make selftest
 When the track 80 check fails, the extended output is:
 
 ```text
-FAIL READ track=80 returned AX=xxxx ENTRY=xx DS=xxxx BX=xxxx FLAGS=xxxx PATH=xx DONE_AX=xxxx
+FAIL READ track=80 returned AX=xxxx TARGET=ssss:oooo CODE=hhhhhhhh ENTRY=xx DS=xxxx BX=xxxx FLAGS=xxxx PATH=xx DONE_AX=xxxx
 ```
 
 Fields:
 - `AX`: the caller-visible return status.
-- `ENTRY`: CS-relative stage marker: `00` = READ entry not reached,
+- `TARGET`: CS:offset of the actual READ label used by the assembler.\n- `CODE`: four bytes read from that CS:offset immediately before CALL.\n  In the instrumented build the READ entry should begin with a CS-prefixed\n  store (`2E C6 ...`). `00` or `FF` bytes here point to an image/layout\n  problem rather than a conditional-branch error.\n- `ENTRY`: CS-relative stage marker: `00` = READ entry not reached,
   `01` = READ entered but common entry not reached, `02` = common
   entry reached but prologue incomplete, `03` = prologue completed.
 - `DS`: segment recorded with a CS override after segment setup;
@@ -118,3 +118,9 @@ Any different BX means the track state changed between caller and READ.
 Unlike the earlier BX/FLAGS/PATH fields, ENTRY and DS are recorded with
 explicit CS segment overrides. This distinguishes a CALL/JMP/prologue
 problem from an incorrect DS base. The normal CBIOS image is unchanged.
+
+For this follow-up the self-test sets AX=5A5Ah immediately before the
+track-80 CALL. The invalid-track result must still be AX=0001h. If the
+callee is never entered, an unchanged 5A5Ah distinguishes that from a
+function which partly executes. Compare TARGET and CODE first, then the
+ENTRY marker and the internal flags.
