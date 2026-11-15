@@ -199,11 +199,17 @@ SETDMAB:
 ; The current emulator supports physical Mini FDC unit 0 only.
 ; Each write reads the whole physical sector before changing one half.
 READ:
+%ifdef CBIOS_SELFTEST
+    mov byte [cs:st_rw_entry],1 ; proves the direct CALL reached READ
+%endif
     xor ah,ah               ; read
     jmp short rw_2d
 WRITE:
     mov ah,1                ; write
 rw_2d:
+%ifdef CBIOS_SELFTEST
+    mov byte [cs:st_rw_entry],2 ; proves JMP reached common entry
+%endif
     push bx
     push cx
     push dx
@@ -217,6 +223,10 @@ rw_2d:
     pop ds                  ; BIOS variables and bounce buffer use CS
     push cs
     pop es
+%ifdef CBIOS_SELFTEST
+    mov byte [cs:st_rw_entry],3 ; segment setup/prologue completed
+    mov [cs:st_rw_ds],ds
+%endif
 
     mov bx,[cur_track]
     cmp bx,80               ; 40 cylinders * 2 side-tracks
