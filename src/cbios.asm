@@ -299,10 +299,10 @@ rw_2d:
     call fdc2d_write
     jc .error
 .success:
-    xor al,al               ; CP/M-86 success
+    xor ax,ax               ; CP/M-86 success: clear full AX, not only AL.
     jmp short .done
 .error:
-    mov al,1                ; CP/M-86 disk error
+    mov ax,1                ; CP/M-86 disk error: clear AH as well.
 .done:
     ; Emit bounded diagnostics before restoring caller context.  For a
     ; successful READ ES still points to the BDOS destination buffer.
