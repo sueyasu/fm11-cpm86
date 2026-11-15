@@ -16,6 +16,8 @@ FDC_TRACK   equ 0xFD19
 FDC_SECTOR  equ 0xFD1A
 FDC_SIDE    equ 0xFD1C
 FDC_DRIVE   equ 0xFD1D
+SER_DATA    equ 0xFD06
+SER_STATUS  equ 0xFD07
 DMA_ADDR    equ 0x10
 DMA_COUNT   equ 0x11
 DMA_MASK    equ 0x1A
@@ -40,6 +42,14 @@ relocate:
     cli
     push cs
     pop ds
+    ; Identify entry into the disk IPL, before relocation.
+    mov dx,SER_STATUS
+    mov al,0x4E
+    out dx,al
+    mov al,0x37
+    out dx,al
+    mov al,'I'
+    call serial_putc
     mov ax,0x0100
     mov es,ax
     xor si,si
@@ -56,6 +66,8 @@ boot:
     mov sp,0x9000
     mov ds,ax
     cld
+    mov al,'R'                    ; relocation completed
+    call serial_putc
     mov bx,RES_START               ; physical DMA destination
     xor bp,bp                      ; cylinder
     xor di,di                      ; head
@@ -67,7 +79,11 @@ boot:
     mov dx,di
     mov dh,dl
     call read_256
-    jc fail
+    jnc .read_ok
+    jmp disk_error
+.read_ok:
+    mov al,'.'                    ; one character per loaded sector
+    call serial_putc
     add bx,256
     cmp bx,RES_END
     je loaded
@@ -86,10 +102,34 @@ loaded:
     mov ax,RES_SEG
     mov es,ax
     cmp byte [es:RES_OFF],0xE9     ; real CBIOS vector opcode
-    jne fail
+    jne vector_error
+    mov al,'J'                    ; jumping to CBIOS INIT
+    call serial_putc
     jmp RES_SEG:RES_OFF
 
+disk_error:
+    mov al,'E'                    ; disk transfer failed
+    call serial_putc
+    mov ax,bp                     ; cylinder
+    call hex_byte
+    mov al,':'
+    call serial_putc
+    mov ax,di                     ; head
+    call hex_byte
+    mov al,':'
+    call serial_putc
+    mov ax,si                     ; sector (1-based)
+    call hex_byte
+    jmp fail
+
+vector_error:
+    mov al,'V'                    ; CBIOS vector is not E9h
+    call serial_putc
 fail:
+    mov al,13
+    call serial_putc
+    mov al,10
+    call serial_putc
     cli
 .halt:
     hlt
@@ -179,4 +219,42 @@ read_256:
     pop ax
     ret
 
-times 0x200-($-$$) db 0
+; Diagnostic console routines.  Retain all caller registers so the
+; DMA destination and CHS loop state cannot be affected by reporting.
+serial_putc:
+    push ax
+    push dx
+    mov ah,al
+    mov dx,SER_STATUS
+.wait:
+    in al,dx
+    test al,1
+    jz .wait
+    mov dx,SER_DATA
+    mov al,ah
+    out dx,al
+    pop dx
+    pop ax
+    ret
+
+hex_byte:
+    push ax
+    shr al,1
+    shr al,1
+    shr al,1
+    shr al,1
+    call hex_nibble
+    pop ax
+    and al,0x0F
+    jmp hex_nibble
+hex_nibble:
+    and al,0x0F
+    cmp al,10
+    jb .digit
+    add al,'A'-10
+    jmp serial_putc
+.digit:
+    add al,'0'
+    jmp serial_putc
+
+times 0x200-($-$) db 0
