@@ -4,7 +4,7 @@ PYTHON ?= python3
 BUILD := build
 CPM86_CORE ?= external/system/cpm86_core.bin
 
-.PHONY: all check-tools check-core bios rom diag cbios-diag check test clean
+.PHONY: all check-tools check-core bios rom diag cbios-diag boot check test clean
 all: bios rom check
 
 check-tools:
@@ -19,6 +19,14 @@ $(BUILD)/cbios.bin: src/cbios.asm | $(BUILD)
 
 $(BUILD)/bootrom.bin: src/bootrom.asm | $(BUILD)
 	$(NASM) -f bin $< -o $@
+
+$(BUILD)/iplrom.bin: src/iplrom.asm | $(BUILD)
+	$(NASM) -f bin $< -o $@
+
+$(BUILD)/fm11_cpm86_2d.img: $(BUILD)/cbios.bin tests/build_boot_2d.py $(CPM86_CORE) | $(BUILD)
+	$(PYTHON) tests/build_boot_2d.py --core $(CPM86_CORE) --cbios $(BUILD)/cbios.bin $@
+
+boot: check-core $(BUILD)/iplrom.bin $(BUILD)/fm11_cpm86_2d.img
 
 $(BUILD)/fdc2d_diag.bin: src/fdc2d_diag.asm | $(BUILD)
 	$(NASM) -f bin $< -o $@
@@ -38,14 +46,15 @@ diag: $(BUILD)/fdc2d_diag.bin
 check: $(BUILD)/cbios.bin $(BUILD)/bootrom.bin
 	$(PYTHON) tests/check_layout.py $(BUILD)/cbios.bin $(BUILD)/bootrom.bin
 
-test: check diag cbios-diag
+test: check diag cbios-diag $(BUILD)/iplrom.bin
 	$(PYTHON) tests/check_diag.py $(BUILD)/fdc2d_diag.bin
 	$(PYTHON) tests/check_cbios_diag.py $(BUILD)/cbios_diag.bin $(BUILD)/cbios_diag_2d.img $(BUILD)/cbios.bin
+	$(PYTHON) tests/check_boot_2d.py $(BUILD)/iplrom.bin $(BUILD)/cbios.bin
 
 check-core:
 	@test -f "$(CPM86_CORE)" || { echo "missing external CP/M-86 core: $(CPM86_CORE)" >&2; exit 1; }
 	@test "$$(wc -c < '$(CPM86_CORE)')" -eq 9472 || { echo "CP/M-86 core must be 0x2500 bytes" >&2; exit 1; }
 
-# A bootable disk is deliberately not produced until floppy IPL + BIOS I/O exist.
+# The boot target requires a separately supplied CP/M-86 resident core.
 clean:
 	rm -rf $(BUILD)
