@@ -170,10 +170,26 @@ SELDSK:
     xor bx,bx
     cmp cl,4
     jae .absent
-    xor ch,ch
-    mov bx,cx
-    shl bx,1
-    mov bx,[cs:dph_table+bx]
+    ; DPH addresses are fixed in this resident image. Return the
+    ; address directly rather than indirecting through another memory
+    ; word; the boot self-test observed a zero pointer on that path.
+    cmp cl,0
+    je .drive0
+    cmp cl,1
+    je .drive1
+    cmp cl,2
+    je .drive2
+    mov bx,dph3
+    jmp short .selected
+.drive0:
+    mov bx,dph0
+    jmp short .selected
+.drive1:
+    mov bx,dph1
+    jmp short .selected
+.drive2:
+    mov bx,dph2
+.selected:
     mov [cs:cur_disk],cl
 .absent:
     ret
