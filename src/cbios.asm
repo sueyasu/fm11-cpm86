@@ -299,7 +299,7 @@ rw_2d:
 
 ; ----------------------------------------------------------------------
 ; Temporary CP/M directory diagnostics. Serial output is bounded to the
-; first 8 SETTRK calls and first 8 READs of side-track 4 (C2/H0).
+; first 32 SETTRK calls and first 48 READs of side-track 4 (C2/H0).
 ; Preserve all caller registers/flags, including AL (BDOS I/O status).
 ; The READ data dump is from the *actual DMA destination* ES:[dma_off],
 ; not just from the physical-sector bounce buffer.
@@ -312,7 +312,7 @@ diag_settrk:
     push ds
     push cs
     pop ds
-    cmp byte [dir_diag_track_count],8
+    cmp byte [dir_diag_track_count],32
     jae .end
     inc byte [dir_diag_track_count]
     mov si,diag_track_msg
@@ -350,7 +350,7 @@ diag_dir_read:
     je .track_four
     jmp .finish
 .track_four:
-    cmp byte [dir_diag_count],8
+    cmp byte [dir_diag_count],48
     jb .under_limit
     jmp .finish
 .under_limit:
