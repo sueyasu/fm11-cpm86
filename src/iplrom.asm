@@ -40,7 +40,6 @@ entry:
     call puts
 
     mov bx,RES_PHYS         ; 8237 channel 0 physical DMA destination
-    mov word [remaining],RES_SECTORS
     xor bp,bp               ; cylinder
     xor di,di               ; side
     mov si,1                ; sector, 1-based
@@ -68,8 +67,8 @@ entry:
     xor di,di
     inc bp
 .next:
-    dec word [remaining]
-    jnz .load
+    cmp bx,RES_PHYS+RES_SECTORS*256
+    jb .load
 
     ; Validate the resident CBIOS first vector, not just the DMA TC bit.
     mov ax,RES_SEG
@@ -203,7 +202,6 @@ putc:
     pop ax
     ret
 
-remaining dw 0
 msg_start db 'FM-11 CP/M-86 2D IPL: loading resident',13,10,0
 msg_loaded db 'FM-11 CP/M-86 IPL: CBIOS vector OK, entering INIT',13,10,0
 msg_read_fail db 'FAIL: resident sector read / DMA',13,10,0
