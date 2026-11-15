@@ -141,6 +141,15 @@ selftest_entry:
     call SETTRK
     xor cx,cx
     call SETSEC
+    ; Validate the actual CBIOS state just before dispatch.  If the
+    ; saved track is not 80, the error is in SETTRK/SETSEC or DS.
+    cmp word [cur_track],80
+    je .track_state_ok
+    mov si,st_bad_track_state
+    mov ax,[cur_track]
+    jmp st_fail_ax
+.track_state_ok:
+    ; READ must return an error without reaching the FDC on track 80.
     call READ
     cmp ax,1
     je .invalid_track_ok
@@ -363,6 +372,7 @@ st_dph_ok db 'PASS SELDSK/DPH/DPB',13,10,0
 st_set_ok db 'PASS SETTRK/HOME/SETSEC/SETDMA/SETDMAB/SECTRAN/GETSEGT',13,10,0
 st_limits_ok db 'PASS READ invalid track/record',13,10,0
 st_bad_track db 'FAIL READ track=80 returned AX=',0
+st_bad_track_state db 'FAIL SETTRK/SETSEC cur_track=',0
 st_bad_record db 'FAIL READ record=32 returned AX=',0
 st_read_ok db 'PASS READ directory ASM86.CMD',13,10,0
 st_key_prompt db 'Press one key for CONIN test: ',0
