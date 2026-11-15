@@ -13,7 +13,7 @@ def check(rom_path, disk_path, bios_path):
     assert rom[0xFF0:0xFF5] == bytes((0xEA, 0, 0, 0, 0xFF)), (
         "invalid reset vector"
     )
-    for phrase in (b"CBIOS 128-byte record test", b"CBIOS loaded from 2D disk",
+    for phrase in (b"CBIOS 128-byte record test", b"CBIOS DMA transfers completed (checking image)",
                    b"PASS: records 0 and 1 read",
                    b"PASS: WRITE, RMW, verify, restore"):
         assert phrase in rom, f"missing diagnostic text: {phrase!r}"
