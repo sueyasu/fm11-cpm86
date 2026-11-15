@@ -483,15 +483,16 @@ dph3:
 
 ; 40 cylinders * 2 sides * 16 sectors * 256 bytes = 320 KiB.
 ; One CP/M logical track is one side: 32 * 128-byte records.
-; Reserve two side-tracks; 78 * 4 KiB / 2 KiB = 156 blocks.
+; Reserve four side-tracks for the 0x3E00-byte CP/M-86 resident
+; image (62 physical sectors): 76 * 4 KiB / 2 KiB = 152 blocks.
 dpb_2d:
     dw 32                 ; SPT: 128-byte records per side-track
     db 4,15,1             ; BSH, BLM, EXM (DSM < 256, 2 KiB blocks)
-    dw 155                ; DSM: blocks 0..155
+    dw 151                ; DSM: blocks 0..151
     dw 63                 ; DRM: 64 directory entries
     db 0x80,0             ; AL0/AL1: one directory block reserved
     dw 16                 ; CKS: (DRM+1)/4
-    dw 2                  ; OFF: two reserved side-tracks
+    dw 4                  ; OFF: four reserved side-tracks (2 cylinders)
 
 dirbuf: times 128 db 0
 csv0: times 16 db 0
