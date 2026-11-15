@@ -196,6 +196,15 @@ entry:
     xor dx,dx
     mov bx,BIOS_SELDSK
     call bios_call
+    ; Capture the actual CBIOS return register before testing it.
+    push bx
+    mov si,msg_seldsk_bx
+    call puts
+    mov ax,bx
+    call hex_word
+    mov si,msg_crlf
+    call puts
+    pop bx
     or bx,bx
     FAIL_Z
     mov si,msg_sel_ok
@@ -565,6 +574,7 @@ msg_first_bad   db 'FAIL: first CBIOS DMA sector has no E9 vector',13,10,0
 msg_ram_bios    db 'RAM 2500: ',0
 msg_ram_2000    db 'RAM 2000: ',0
 msg_sel         db 'STEP: SELDSK',13,10,0
+msg_seldsk_bx   db 'SELDSK BX: ',0
 msg_vector      db 'SELDSK vector: ',0
 msg_target      db 13,10,'Target: ',0
 msg_crlf        db 13,10,0
