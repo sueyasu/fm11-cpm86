@@ -33,10 +33,19 @@ relocate:
     push cs
     pop ds
     mov dx,SER_STATUS
+    ; 8251 initial state is not guaranteed by the original emulator
+    ; warm reset. Drive the USART into command mode and perform an
+    ; internal reset before selecting asynchronous mode.
+    xor al,al
+    out dx,al
+    out dx,al
+    out dx,al
+    mov al,0x40
+    out dx,al                  ; 8251 internal reset (Init=0)
     mov al,0x4E
-    out dx,al
+    out dx,al                  ; asynchronous mode (Init=3)
     mov al,0x37
-    out dx,al
+    out dx,al                  ; TxEN/RxEN/RTS/DTR, reset errors
     mov al,'I'
     call putc
     mov ax,0x0100
@@ -102,17 +111,24 @@ halt:
 ; Serial output does not disturb the load loop's registers.
 putc:
     push ax
+    push cx
     push dx
     mov ah,al
     mov dx,SER_STATUS
+    mov cx,0xFFFF              ; no indefinite loop if TXRDY stays low
 .wait:
     in al,dx
     test al,1
-    jz .wait
+    jnz .ready
+    loop .wait
+    jmp .done                  ; no serial connection or USART failure
+.ready:
     mov dx,SER_DATA
     mov al,ah
     out dx,al
+.done:
     pop dx
+    pop cx
     pop ax
     ret
 
