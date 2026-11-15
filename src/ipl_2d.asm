@@ -33,19 +33,26 @@ relocate:
     push cs
     pop ds
     mov dx,SER_STATUS
-    ; 8251 initial state is not guaranteed by the original emulator
-    ; warm reset. Drive the USART into command mode and perform an
-    ; internal reset before selecting asynchronous mode.
+    ; The original FM-11 boot ROM can leave USART0 initialized with
+    ; DTR asserted and a named-pipe terminal connected. Resetting its
+    ; 8251 then drives DTR low and CNamedPipe::DoClose() disconnects it.
+    ; Reuse an already-enabled transmitter without touching command port.
+    in al,dx
+    test al,1                  ; TxRDY
+    jnz .serial_ready
+    ; On a cold, disabled USART use the proven 8251 reset sequence.
+    ; No active transmitter is available in that case.
     xor al,al
     out dx,al
     out dx,al
     out dx,al
     mov al,0x40
-    out dx,al                  ; 8251 internal reset (Init=0)
+    out dx,al
     mov al,0x4E
-    out dx,al                  ; asynchronous mode (Init=3)
-    mov al,0x37
-    out dx,al                  ; TxEN/RxEN/RTS/DTR, reset errors
+    out dx,al
+    mov al,0x37               ; DTR and TxEN asserted
+    out dx,al
+.serial_ready:
     mov al,'I'
     call putc
     mov ax,0x0100
