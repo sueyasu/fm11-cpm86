@@ -19,7 +19,8 @@ provided CCP/BDOS core followed by BIOS at offset 2500h, using a 0x1900
 byte BIOS area. This project initially reserves the same offsets and
 retains the CBIOS 21-entry jump table, pending actual FM-11 boot verification.
 The experimental 2D IPL ROM now loads this resident image at segment
-0800h and enters CBIOS INIT at 0800:2500. A usable CCP/BDOS boot is
+0400h and enters CBIOS INIT at 0400:2500. The initial BIOS stack tops
+out at 0400:4000 (physical 08000h), below the TPA base at segment 0800h. A usable CCP/BDOS boot is
 not yet verified.
 
 ## FM-11 devices
