@@ -28,7 +28,12 @@
     cmp %2,%3
     je %%good
     push ax
+%if %1 = 7 || %1 = 8 || %1 = 9 || %1 = 12
+    xor ax,ax
+    mov al,%2
+%else
     mov ax,%2
+%endif
     mov [cs:st_dph_actual],ax
     mov ax,%3
     mov [cs:st_dph_expected],ax
