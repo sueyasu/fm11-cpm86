@@ -15,6 +15,11 @@ def check(rom, bios_path):
     bios = pathlib.Path(bios_path).read_bytes()
     assert len(bootrom) == 0x1000
     assert bootrom[0xFF0:0xFF5] == bytes((0xEA, 0, 0, 0, 0xFF))
+    # The standalone IPL replaces the original FM-11 8088 boot ROM;
+    # retain its 8259 ICW1/ICW2/ICW4 + OCW1 all-masked setup.
+    assert bytes.fromhex(
+        "B0 1B E6 00 B0 08 E6 01 B0 09 E6 01 B0 FF E6 01"
+    ) in bootrom, "standalone IPL must initialize and mask the 8259 PIC"
     for phrase in (b"FM-11 CP/M-86 2D IPL: loading resident",
                    b"FM-11 CP/M-86 IPL: CBIOS vector OK, entering INIT",
                    b"FAIL: resident sector read / DMA"):
