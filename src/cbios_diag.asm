@@ -123,6 +123,21 @@ entry:
 
     mov si,msg_loaded
     call puts
+
+    ; Verify that the *loaded* CBIOS vector dispatches into the expected
+    ; 8086 SELDSK prologue. FDC TC alone cannot prove transferred bytes.
+    cmp byte [BIOS_SELDSK],0xE9
+    jne invalid_bios
+    mov bx,[BIOS_SELDSK+1]   ; signed near-JMP displacement
+    add bx,BIOS_SELDSK+3
+    cmp bx,BIOS_BASE
+    jb invalid_bios
+    cmp bx,BIOS_BASE+BIOS_BYTES-2
+    ja invalid_bios
+    cmp word [bx],0xDB31    ; xor bx,bx: first instruction of SELDSK
+    jne invalid_bios
+    mov si,msg_vector_ok
+    call puts
     mov si,msg_sel
     call puts
 
@@ -252,6 +267,10 @@ entry:
 
 load_failed:
     mov si,msg_load_fail
+    call puts
+    jmp stop
+invalid_bios:
+    mov si,msg_invalid_bios
     call puts
     jmp stop
 test_failed:
@@ -442,6 +461,8 @@ putc:
 
 msg_start       db 'CBIOS 128-byte record test',13,10,0
 msg_sel         db 'STEP: SELDSK',13,10,0
+msg_vector_ok   db 'PASS: SELDSK vector and target bytes',13,10,0
+msg_invalid_bios db 'FAIL: CBIOS SELDSK vector/target content',13,10,0
 msg_sel_ok      db 'STEP: SELDSK OK',13,10,0
 msg_read_start  db 'STEP: READ record 0',13,10,0
 msg_record0     db 'STEP: READ record 0 returned',13,10,0
