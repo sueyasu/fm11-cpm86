@@ -150,6 +150,8 @@ selftest_entry:
     jmp st_fail_ax
 .track_state_ok:
     ; READ must return an error without reaching the FDC on track 80.
+    mov byte [st_rw_entry],0
+    mov word [st_rw_ds],0xffff
     mov byte [st_rw_path],0
     mov word [st_rw_track_bx],0xffff
     mov word [st_rw_track_flags],0xffff
@@ -163,6 +165,14 @@ selftest_entry:
     mov si,st_bad_track
     call serial_puts
     pop ax
+    call st_hex_word
+    mov si,st_trace_entry
+    call serial_puts
+    mov al,[st_rw_entry]
+    call st_hex_byte
+    mov si,st_trace_ds
+    call serial_puts
+    mov ax,[st_rw_ds]
     call st_hex_word
     mov si,st_trace_bx
     call serial_puts
@@ -393,6 +403,8 @@ st_hex_nibble:
 st_saved_iobyte db 0
 st_key db 0
 st_dirty db 0
+st_rw_entry db 0
+st_rw_ds dw 0xffff
 ; Observation slots used only by the CBIOS_SELFTEST code path.
 st_rw_track_bx dw 0xffff
 st_rw_track_flags dw 0xffff
@@ -405,6 +417,8 @@ st_dph_ok db 'PASS SELDSK/DPH/DPB',13,10,0
 st_set_ok db 'PASS SETTRK/HOME/SETSEC/SETDMA/SETDMAB/SECTRAN/GETSEGT',13,10,0
 st_limits_ok db 'PASS READ invalid track/record',13,10,0
 st_bad_track db 'FAIL READ track=80 returned AX=',0
+st_trace_entry db ' ENTRY=',0
+st_trace_ds db ' DS=',0
 st_trace_bx db ' BX=',0
 st_trace_flags db ' FLAGS=',0
 st_trace_path db ' PATH=',0
