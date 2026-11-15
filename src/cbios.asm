@@ -70,6 +70,7 @@ INIT:
     out dx,al
     mov byte [dir_diag_count],0
     mov byte [dir_diag_track_count],0
+    mov byte [input_diag_count],0
     mov word [cur_track],0
     mov word [cur_sector],0
     mov word [dma_off],0x0080
@@ -112,6 +113,7 @@ CONIN:
     mov dx,SER_DATA
     in al,dx
     pop dx
+    call diag_conin_byte
     ret
 
 CONOUT:
@@ -315,6 +317,36 @@ rw_2d:
 ; The READ data dump is from the *actual DMA destination* ES:[dma_off],
 ; not just from the physical-sector bounce buffer.
 ; ----------------------------------------------------------------------
+; Trace the first 64 bytes returned to CCP by CONIN, including CR/LF.
+; Uses direct serial output; preserves AL, all other registers and flags.
+diag_conin_byte:
+    pushf
+    push ax
+    push bx
+    push dx
+    push si
+    push ds
+    push cs
+    pop ds
+    cmp byte [input_diag_count],64
+    jae .done
+    inc byte [input_diag_count]
+    mov bl,al
+    mov si,diag_input_msg
+    call serial_puts
+    mov al,bl
+    call diag_hex_byte
+    mov si,diag_crlf
+    call serial_puts
+.done:
+    pop ds
+    pop si
+    pop dx
+    pop bx
+    pop ax
+    popf
+    ret
+
 diag_settrk:
     pushf
     push ax
@@ -450,6 +482,7 @@ diag_hex_nibble:
     add al,'0'
     jmp serial_putc
 
+diag_input_msg db 'DBG CONIN=',0
 diag_track_msg db 'DBG SETTRK=',0
 diag_read_msg db 'DBG READ T=',0
 diag_sec_msg db ' S=',0
@@ -479,6 +512,7 @@ cur_disk db 0
 iobyte db 0
 dir_diag_count db 0
 dir_diag_track_count db 0
+input_diag_count db 0
 cur_track dw 0
 cur_sector dw 0
 dma_off dw 0x80
