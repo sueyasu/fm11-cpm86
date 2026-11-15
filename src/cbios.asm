@@ -4,7 +4,9 @@
 ; IPL/cold-boot and file-level CP/M-86 compatibility are not yet verified.
 cpu 8086
 bits 16
+%ifndef CBIOS_EMBEDDED
 org 0x2500
+%endif
 bios_start:
 
 SER_DATA     equ 0xFD06
@@ -531,9 +533,5 @@ mrt:
     db 1
     dw 0x0800,0x7800
 
-%ifdef CBIOS_SELFTEST
-%include "src/cbios_selftest.inc"
-%endif
-
-; Pad to the fixed 0x1900-byte CBIOS image size.
-times BIOS_SIZE - ($ - $) db 0
+; Pad the CBIOS itself (not the optional 0x2500-byte preceding core).
+times BIOS_SIZE - ($ - bios_start) db 0
