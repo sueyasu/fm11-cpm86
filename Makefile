@@ -5,7 +5,7 @@ BUILD := build
 CPM86_CORE ?= external/system/cpm86_core.bin
 EXTERNAL_COMMANDS := $(sort $(wildcard external/commands/*.CMD external/commands/*.cmd))
 
-.PHONY: all check-tools check-core bios rom diag cbios-diag boot check test clean
+.PHONY: all check-tools check-core bios rom diag cbios-diag boot selftest check test clean
 all: bios rom check
 
 check-tools:
@@ -18,6 +18,11 @@ $(BUILD):
 $(BUILD)/cbios.bin: src/cbios.asm | $(BUILD)
 	$(NASM) -f bin $< -o $@
 
+# Self-test variant: same 21 entry vectors/CBIOS code, but INIT runs
+# embedded diagnostics instead of entering CCP/BDOS.
+$(BUILD)/cbios_selftest.bin: src/cbios.asm src/cbios_selftest.inc | $(BUILD)
+	$(NASM) -DCBIOS_SELFTEST=1 -f bin $< -o $@
+
 $(BUILD)/bootrom.bin: src/bootrom.asm | $(BUILD)
 	$(NASM) -f bin $< -o $@
 
@@ -29,6 +34,22 @@ $(BUILD)/fm11_cpm86_2d.img: $(BUILD)/cbios.bin tests/build_boot_2d.py $(CPM86_CO
 		$(foreach f,$(EXTERNAL_COMMANDS),--file $(f)) $@
 
 boot: check-core $(BUILD)/iplrom.bin $(BUILD)/fm11_cpm86_2d.img
+
+# Only the disposable copy may be written by the test (last disk record).
+# ASM86.CMD is fixed as the first entry for the READ-data assertion.
+SELFTEST_ASM86 := $(firstword $(wildcard external/commands/ASM86.CMD external/commands/asm86.cmd))
+
+$(BUILD)/fm11_cpm86_selftest_2d.img: $(BUILD)/cbios_selftest.bin tests/build_boot_2d.py $(CPM86_CORE) $(SELFTEST_ASM86) | $(BUILD)
+	@test -n "$(SELFTEST_ASM86)" || { echo "missing external/commands/ASM86.CMD for self-test" >&2; exit 1; }
+	$(PYTHON) tests/build_boot_2d.py --core $(CPM86_CORE) --cbios $(BUILD)/cbios_selftest.bin \
+		--file "$(SELFTEST_ASM86)" $@
+
+selftest: check-core $(BUILD)/iplrom.bin $(BUILD)/fm11_cpm86_selftest_2d.img
+	$(PYTHON) tests/check_layout.py $(BUILD)/cbios_selftest.bin $(BUILD)/iplrom.bin
+	@echo "SELFTEST: boot with build/iplrom.bin and build/fm11_cpm86_selftest_2d.img"
+	@echo "WARNING: self-test writes/restores the last record; use only this disposable image."
+
+
 
 $(BUILD)/fdc2d_diag.bin: src/fdc2d_diag.asm | $(BUILD)
 	$(NASM) -f bin $< -o $@
