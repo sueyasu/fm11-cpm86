@@ -40,6 +40,9 @@ relocate:
     ; Relocate all 512 bytes before accessing disk sectors which will
     ; overwrite the original image at physical 07C00h.
     cli
+    xor ax,ax
+    mov ss,ax
+    mov sp,0x9000                 ; valid stack before CALL serial_putc
     push cs
     pop ds
     ; Identify entry into the disk IPL, before relocation.
