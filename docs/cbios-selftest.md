@@ -1,15 +1,14 @@
 # Embedded CBIOS self-test (FM-11 8088)
 
-Use this to test the **actual CBIOS** without executing CCP/BDOS. The
-self-test is assembled into the same CBIOS image and its INIT entry jumps
-to the self-test instead of the CCP cold entry. The regular `make boot`
+Use this to test the **actual CBIOS** without executing CCP/BDOS. The self-test replaces the CCP/BDOS core region (0x2500 bytes) in a disposable
+image, while the *real CBIOS remains 0x1900 bytes*. Its INIT entry jumps
+back to the self-test instead of the CCP cold entry. The regular `make boot`
 image and `build/cbios.bin` are unchanged.
 
 ## Build
 
-Run from the repository root, with `nasm`, the original external
-`external/system/cpm86_core.bin` and `external/commands/ASM86.CMD`
-present:
+Run from the repository root, with `nasm`, `external/commands/ASM86.CMD` present. The normal external CP/M-86 core
+is **not required** for this diagnostic:
 
 ```sh
 git pull
@@ -18,7 +17,8 @@ make selftest
 
 This creates:
 
-- `build/cbios_selftest.bin` — 0x1900-byte CBIOS with embedded tests
+- `build/cbios_selftest_core.bin` — 0x2500-byte diagnostic replacement core
+- `build/cbios_selftest.bin` — 0x1900-byte CBIOS, INIT redirects to test core
 - `build/fm11_cpm86_selftest_2d.img` — separate disposable 320 KiB disk
 - `build/iplrom.bin` — same IPL ROM as the normal build
 
