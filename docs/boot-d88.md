@@ -85,3 +85,21 @@ first serial character, the IPL does **not** wait for terminal input.
 An early `I` may be lost if the PTY is attached after the IPL begins.
 The output is designed to be compact enough for the 512-byte boot sector,
 rather than provide a verbose interactive diagnostic.
+
+## 8088 original emulator: serial TX wait at 07CA9h
+
+The original emulator v128 implements the shared 8251 as a state machine
+(`Fm11/MainCpu.cpp`, `Fm11RS232C`). A cold or warm boot need not leave
+its mode/command parser in the initial `Init=0` state. Previously, the
+disk IPL wrote only `4Eh` (mode) and `37h` (command). If interpreted in
+the wrong parser state, TXRDY bit 0 can remain clear and the first
+diagnostic output spins in `IN AL,DX / TEST AL,1 / JZ`. On the original
+emulator a stop at physical `07CA9h` with `JZ FB` matches this loop.
+
+The disk IPL now issues three zero control writes, `40h` (8251 internal
+reset), `4Eh` (asynchronous mode) and `37h` (enable TX/RX). These
+writes synchronize the 8251 parser from any of its four initial states.
+It also bounds the serial TX-ready polling, so a missing USART or
+non-ready transmitter cannot block the resident disk loader forever.
+Missing stage letters therefore no longer necessarily mean the disk
+IPL was never entered: examine the PC or later resident startup as well.
