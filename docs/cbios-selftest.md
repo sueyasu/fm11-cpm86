@@ -69,3 +69,43 @@ not make this an end-to-end CP/M-86 test.
 
 This test depends on NASM assembly and an emulator run. A successful
 image layout check alone does **not** prove runtime PASS.
+
+## Track 80 branch trace (Linux 8088 investigation)
+
+After the stand-alone `main8088_cmp_jae` test passed but the complete
+CBIOS self-test reported `FAIL READ track=80 returned AX=0000`, the
+self-test-only build gained minimally invasive trace slots. The normal
+`build/cbios.bin` and production disk image are unaffected.
+
+Rebuild and run the disposable self-test image as before:
+
+```sh
+git pull
+make selftest
+```
+
+When the track 80 check fails, the extended output is:
+
+```text
+FAIL READ track=80 returned AX=xxxx BX=xxxx FLAGS=xxxx PATH=xx DONE_AX=xxxx
+```
+
+Fields:
+- `AX`: the caller-visible return status.
+- `BX`: the value of `cur_track` actually loaded inside READ before CMP.
+- `FLAGS`: saved immediately after `CMP BX,80` (CF=bit 0, ZF=bit 6).
+  For BX=0050h, expected CF=0 and ZF=1.
+- `PATH`: `01` = comparison reached but no branch landing observed,
+  `02` = `.invalid` branch executed, `03` = `.valid` branch executed,
+  `00` = comparison never reached.
+- `DONE_AX`: AX at READ's shared epilogue, before POPs/RET.
+  For an invalid track it should be 0001h.
+
+This trace captures data with MOV and PUSHF/POP memory, which preserve
+the CMP condition flags used by JAE. It does not modify the BIOS
+control flow or log to the serial port from within READ.
+
+Interpreting an anomaly: `BX=0050 FLAGS=004x PATH=03` would implicate
+the conditional branch or address decoding; `PATH=02 DONE_AX=0001
+AX=0000` would implicate stack/return or post-return behavior.
+Any different BX means the track state changed between caller and READ.
