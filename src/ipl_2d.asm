@@ -1,12 +1,15 @@
 ; FM-11 EX 8088 disk IPL (2D), 512-byte ROM-loaded bootstrap.
-; Expected by this experimental image: ROM reads C0/H0/S1-S2 to
-; physical 0000:0400 and transfers execution to 0000:0400.
+; The original FM-11 8088 boot ROM (BootRom86.h v128) transfers control
+; to 07C0:0000 (physical 07C00h), not 0000:0400.
+; It may load more than the first two sectors. Before loading the full
+; resident image, relocate this IPL to 0100:0000 (physical 01000h).
+; This is necessary because the resident image overwrites 07C00h.
 ; The 0x3E00-byte resident follows in C0/H0/S3 onward, 62 sectors.
 ; The current 4-KiB IPL ROM is NOT copied onto the floppy; this is a
 ; distinct, compact disk bootstrap.
 cpu 8086
 bits 16
-org 0x0400
+org 0
 
 FDC_CMD     equ 0xFD18
 FDC_TRACK   equ 0xFD19
@@ -27,8 +30,24 @@ RES_START   equ 0x4000
 RES_END     equ 0x7E00
 
 start:
-    jmp short boot
+    jmp short relocate
     times 13 db 0                  ; reserved bootstrap header space
+
+relocate:
+    ; On entry CS=07C0h, IP=0000h (verified from BootRom86.h).
+    ; Relocate all 512 bytes before accessing disk sectors which will
+    ; overwrite the original image at physical 07C00h.
+    cli
+    push cs
+    pop ds
+    mov ax,0x0100
+    mov es,ax
+    xor si,si
+    xor di,di
+    mov cx,0x0100
+    cld
+    rep movsw
+    jmp 0x0100:boot
 
 boot:
     cli
