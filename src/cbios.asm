@@ -91,6 +91,9 @@ WBOOT:
     jmp 0x0006           ; provisional: disk reload not implemented
 
 CONST:
+    ; Preserve DX: unlike the PC-98 immediate-port IN, FM-11 I/O
+    ; addresses require the DX form.  BDOS/CCP may hold live data in DX.
+    push dx
     mov dx,SER_STATUS
     in al,dx
     test al,SER_RX_READY
@@ -98,14 +101,17 @@ CONST:
     jz .done
     dec al               ; 0xFF means input available
 .done:
+    pop dx
     ret
 
 CONIN:
     call CONST
     or al,al
     jz CONIN
+    push dx
     mov dx,SER_DATA
     in al,dx
+    pop dx
     ret
 
 CONOUT:
@@ -124,14 +130,19 @@ LISTST:
 
 serial_putc:
     push ax
+    push dx
     mov dx,SER_STATUS
 .wait:
     in al,dx
     test al,SER_TX_READY
     jz .wait
+    pop dx
     pop ax
+    ; DX is still needed for data-port OUT: preserve it until return.
+    push dx
     mov dx,SER_DATA
     out dx,al
+    pop dx
     ret
 
 serial_puts:
