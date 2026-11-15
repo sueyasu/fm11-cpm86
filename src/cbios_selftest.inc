@@ -150,11 +150,39 @@ selftest_entry:
     jmp st_fail_ax
 .track_state_ok:
     ; READ must return an error without reaching the FDC on track 80.
+    mov byte [st_rw_path],0
+    mov word [st_rw_track_bx],0xffff
+    mov word [st_rw_track_flags],0xffff
+    mov word [st_rw_done_ax],0xffff
     call READ
     cmp ax,1
     je .invalid_track_ok
+    ; Print both caller-return AX and the independent observations
+    ; captured *inside* READ. This identifies the first divergence.
+    push ax
     mov si,st_bad_track
-    jmp st_fail_ax
+    call serial_puts
+    pop ax
+    call st_hex_word
+    mov si,st_trace_bx
+    call serial_puts
+    mov ax,[st_rw_track_bx]
+    call st_hex_word
+    mov si,st_trace_flags
+    call serial_puts
+    mov ax,[st_rw_track_flags]
+    call st_hex_word
+    mov si,st_trace_path
+    call serial_puts
+    mov al,[st_rw_path]
+    call st_hex_byte
+    mov si,st_trace_done
+    call serial_puts
+    mov ax,[st_rw_done_ax]
+    call st_hex_word
+    mov si,st_crlf
+    call serial_puts
+    jmp st_fail
 .invalid_track_ok:
     mov cx,4
     call SETTRK
@@ -365,6 +393,11 @@ st_hex_nibble:
 st_saved_iobyte db 0
 st_key db 0
 st_dirty db 0
+; Observation slots used only by the CBIOS_SELFTEST code path.
+st_rw_track_bx dw 0xffff
+st_rw_track_flags dw 0xffff
+st_rw_done_ax dw 0xffff
+st_rw_path db 0
 st_title db 13,10,'CBIOS SELFTEST (NO CCP/BDOS)',13,10,0
 st_console_ok db 13,10,'PASS CONOUT/LISTOUT/PUNCH/CONST/LISTST',13,10,0
 st_io_ok db 'PASS GETIOBF/SETIOBF',13,10,0
@@ -372,6 +405,10 @@ st_dph_ok db 'PASS SELDSK/DPH/DPB',13,10,0
 st_set_ok db 'PASS SETTRK/HOME/SETSEC/SETDMA/SETDMAB/SECTRAN/GETSEGT',13,10,0
 st_limits_ok db 'PASS READ invalid track/record',13,10,0
 st_bad_track db 'FAIL READ track=80 returned AX=',0
+st_trace_bx db ' BX=',0
+st_trace_flags db ' FLAGS=',0
+st_trace_path db ' PATH=',0
+st_trace_done db ' DONE_AX=',0
 st_bad_track_state db 'FAIL SETTRK/SETSEC cur_track=',0
 st_bad_record db 'FAIL READ record=32 returned AX=',0
 st_read_ok db 'PASS READ directory ASM86.CMD',13,10,0
