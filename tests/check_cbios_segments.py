@@ -31,10 +31,10 @@ for name, variables in required.items():
         )
 # SELDSK should not read the DPH address from an extra memory table.
 # A:..D: have fixed descriptors in the current resident image.
-sel_start = source.index("\\nSELDSK:\\n")
-sel_end = source.index("\\nSETTRK:\\n", sel_start)
+sel_start = source.index("\nSELDSK:\n")
+sel_end = source.index("\nSETTRK:\n", sel_start)
 sel = source[sel_start:sel_end]
 for n in range(4):
-    assert re.search(rf"mov bx,dph{n}\\b", sel), f"SELDSK must return dph{n} directly"
+    assert re.search(rf"mov bx,dph{n}\b", sel), f"SELDSK must return dph{n} directly"
 assert "mov bx,[cs:dph_table+bx]" not in sel
 print("PASS CBIOS entry points use CS for BIOS-owned state and fixed DPH addresses")
