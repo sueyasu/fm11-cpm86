@@ -220,6 +220,14 @@ rw_2d:
 
     mov bx,[cur_track]
     cmp bx,80               ; 40 cylinders * 2 side-tracks
+%ifdef CBIOS_SELFTEST
+    ; Diagnostic only. PUSHF/POP memory preserve CMP FLAGS for JAE;
+    ; report whether the actual instruction sees the expected BX/CF/ZF.
+    mov [st_rw_track_bx],bx
+    pushf
+    pop word [st_rw_track_flags]
+    mov byte [st_rw_path],1
+%endif
     jae .invalid
     mov bx,[cur_sector]
     cmp bx,32               ; 128-byte logical records, numbered 0..31
@@ -231,8 +239,14 @@ rw_2d:
     jne .invalid
     jmp short .valid
 .invalid:
+%ifdef CBIOS_SELFTEST
+    mov byte [st_rw_path],2      ; input rejected before disk access
+%endif
     jmp .error
 .valid:
+%ifdef CBIOS_SELFTEST
+    mov byte [st_rw_path],3      ; input accepted; disk access follows
+%endif
     ; Translate side-track and logical record to physical CHS.
     mov bx,[cur_track]
     mov dx,bx
@@ -298,6 +312,9 @@ rw_2d:
 .error:
     mov ax,1                ; CP/M-86 disk error: clear AH as well.
 .done:
+%ifdef CBIOS_SELFTEST
+    mov [st_rw_done_ax],ax       ; status before saved registers are restored
+%endif
     pop es
     pop ds
     pop bp
