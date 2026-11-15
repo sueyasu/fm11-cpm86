@@ -2,7 +2,7 @@
 
 This project is an initial port of CP/M-86 to the Fujitsu FM-11's 8088
 main CPU card (or NEC V20 replacement). A first-stage 2D IPL ROM and
-image builder are available, but **successful OS boot has not yet been verified**.
+image builder are available. **The 2D boot to the A> prompt and empty DIR\nhave been verified in the emulator.**
 
 ## References
 
@@ -190,7 +190,31 @@ CCP/BDOS core (0x2500 bytes) followed by `build/cbios.bin` (0x1900
 bytes). Neither the proprietary core nor its binaries are committed.
 
 Provide the external core at `external/system/cpm86_core.bin`
-(or set `CPM86_CORE` in the make invocation):
+(or set `CPM86_CORE` in the make invocation).
+
+To include commands on the boot disk, put the CP/M-86 `.CMD` files in
+`external/commands/`, just as in the PC-98 port. Both lowercase
+`.cmd` and uppercase `.CMD` extensions are recognized. The builder
+imports each matching file into the CP/M directory with an uppercase
+8.3 filename. For example:
+
+```text
+external/commands/
+  PIP.CMD
+  STAT.CMD
+  ED.CMD
+```
+
+The image uses the CBIOS 2D DPB: 2 KiB allocation blocks,
+16 one-byte block numbers per directory entry (DSM=151), EXM=1,
+and 64 directory entries. A file larger than 32 KiB is split
+across multiple directory entries. Duplicate 8.3 names, invalid
+names, full directory, or insufficient free data blocks cause an
+explicit build error. `make boot` picks up files present when
+Make runs; changes to existing files trigger image regeneration.
+When adding/removing files, rerun `make boot`; if removing a file
+without changing any other dependencies, `make -B boot` guarantees
+rebuilding the disk.
 
 ```sh
 make test            # checks assembly/geometry, needs no external core
@@ -201,7 +225,7 @@ make boot            # requires a real 0x2500-byte core
 `build/fm11_cpm86_2d.img` (320 KiB, raw 2D). If the core is not
 available, the ROM alone can be assembled with `make build/iplrom.bin`.
 The first **four** logical side-tracks (two cylinders, 16 KiB) are
-reserved for the resident image; the empty CP/M directory starts
+reserved for the resident image; the CP/M directory starts
 at physical cylinder 2. Corresponding DPB parameters are `OFF=4`,
 `DSM=151`. The last 512 bytes of the system area are left erased.
 
@@ -224,18 +248,18 @@ FM-11 CP/M-86 IPL: CBIOS vector OK, entering INIT
 FM-11 CP/M-86 BIOS: serial initialized
 ```
 
-Only the first two messages establish that the IPL reached CBIOS.
-Whether CCP/BDOS subsequently reaches a usable CP/M prompt remains
-untested. `INIT`, `WBOOT`, the provisional memory-region table,
-filesystem operations, and interrupt-vector conventions need
-end-to-end verification. Avoid using valuable media: this is
+The IPL, CBIOS INIT, CCP prompt and empty-directory `DIR` have been
+confirmed in the FM-11 emulator. The new command-populated image still
+requires live verification with `DIR`, `STAT`, `PIP` and executable
+`.CMD` files. `WBOOT`, the provisional memory-region table, and
+more complex file operations also require testing. Avoid using valuable media: this is
 experimental firmware, and the CBIOS supports write operations.
 
 ## Next milestones
 
-1. Verify the experimental IPL boots the external core to a CP/M-86 prompt.
-2. Fix any remaining INIT/WBOOT/memory-region and CCP/BDOS ABI issues.
-3. Validate CP/M directory and file I/O on disposable 2D media.
+1. Verify command-populated 2D media using DIR and external CMD execution.
+2. Fix any remaining WBOOT/memory-region and CCP/BDOS ABI issues.
+3. Validate CP/M file creation/read/write on disposable 2D media.
 4. Add standard D88 output and additional drive/2HD hardware support.
 5. Test warm boot, standard CP/M commands, and real FM-11 hardware.
 
