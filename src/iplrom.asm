@@ -54,7 +54,9 @@ entry:
     mov dh,dl               ; DH = side
     mov ax,bx
     call fdc_read
-    jc load_failed
+    jnc .sector_ok
+    jmp load_failed          ; 8086 Jcc is short-only
+.sector_ok:
     add bx,256
     inc si
     cmp si,17
