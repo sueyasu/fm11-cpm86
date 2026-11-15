@@ -13,7 +13,7 @@ entry_points += source[tail_start:tail_end]
 
 required = {
     "HOME": ("cur_track",),
-    "SELDSK": ("dph_table", "cur_disk"),
+    "SELDSK": ("cur_disk",),
     "SETTRK": ("cur_track",),
     "SETSEC": ("cur_sector",),
     "SETDMA": ("dma_off",),
@@ -29,4 +29,12 @@ for name, variables in required.items():
         assert re.search(rf"\[cs:{var}(?:\+\w+)?\]", body), (
             f"{name} must access BIOS-owned {var} relative to CS, not caller DS"
         )
-print("PASS CBIOS entry points use CS for BIOS-owned state")
+# SELDSK should not read the DPH address from an extra memory table.
+# A:..D: have fixed descriptors in the current resident image.
+sel_start = source.index("\\nSELDSK:\\n")
+sel_end = source.index("\\nSETTRK:\\n", sel_start)
+sel = source[sel_start:sel_end]
+for n in range(4):
+    assert re.search(rf"mov bx,dph{n}\\b", sel), f"SELDSK must return dph{n} directly"
+assert "mov bx,[cs:dph_table+bx]" not in sel
+print("PASS CBIOS entry points use CS for BIOS-owned state and fixed DPH addresses")
