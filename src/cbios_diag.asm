@@ -574,7 +574,7 @@ msg_read_start  db 'STEP: READ record 0',13,10,0
 msg_record0     db 'STEP: READ record 0 returned',13,10,0
 msg_record1     db 'STEP: READ record 1 returned',13,10,0
 msg_write_start db 'STEP: WRITE record 0',13,10,0
-msg_loaded      db 'CBIOS loaded from 2D disk',13,10,0
+msg_loaded      db 'CBIOS DMA transfers completed (checking image)',13,10,0
 msg_read        db 'PASS: records 0 and 1 read',13,10,0
 msg_pass        db 'PASS: WRITE, RMW, verify, restore',13,10,0
 msg_load_fail   db 'FAIL: CBIOS disk load',13,10,0
