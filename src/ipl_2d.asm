@@ -1,153 +1,125 @@
-; FM-11 EX 8088 disk IPL (2D), 512-byte ROM-loaded bootstrap.
-; The original FM-11 8088 boot ROM (BootRom86.h v128) transfers control
-; to 07C0:0000 (physical 07C00h), not 0000:0400.
-; It may load more than the first two sectors. Before loading the full
-; resident image, relocate this IPL to 0100:0000 (physical 01000h).
-; This is necessary because the resident image overwrites 07C00h.
-; The 0x3E00-byte resident follows in C0/H0/S3 onward, 62 sectors.
-; The current 4-KiB IPL ROM is NOT copied onto the floppy; this is a
-; distinct, compact disk bootstrap.
+; FM-11 8088 disk IPL (2D), boot ROM entry 07C0:0000.
+; Fits the two 256-byte boot sectors. The first action is relocation
+; from physical 07C00h to 01000h, because the 0x3E00-byte resident
+; image loaded at 04000h..07DFFh would overwrite the running IPL.
+; Serial diagnostics: I=entry, R=relocated, .=sector, E=read error,
+; V=CBIOS vector mismatch, J=jump to CBIOS.
 cpu 8086
 bits 16
 org 0
 
-FDC_CMD     equ 0xFD18
-FDC_TRACK   equ 0xFD19
-FDC_SECTOR  equ 0xFD1A
-FDC_SIDE    equ 0xFD1C
-FDC_DRIVE   equ 0xFD1D
-SER_DATA    equ 0xFD06
-SER_STATUS  equ 0xFD07
-DMA_ADDR    equ 0x10
-DMA_COUNT   equ 0x11
-DMA_MASK    equ 0x1A
-DMA_MODE    equ 0x1B
-DMA_FF      equ 0x1C
-DMA_TC      equ 0x18
-DMA_BANK    equ 0x20
-
-RES_SEG     equ 0x0400
-RES_OFF     equ 0x2500
-RES_START   equ 0x4000
-RES_END     equ 0x7E00
+SER_STATUS equ 0xFD07
+SER_DATA   equ 0xFD06
+DMA_ADDR   equ 0x10
+DMA_COUNT  equ 0x11
+DMA_TC     equ 0x18
+DMA_MASK   equ 0x1A
+DMA_MODE   equ 0x1B
+DMA_FF     equ 0x1C
+DMA_BANK   equ 0x20
+FDC_CMD    equ 0xFD18
+FDC_TRACK  equ 0xFD19
+FDC_SIDE   equ 0xFD1C
 
 start:
     jmp short relocate
-    times 13 db 0                  ; reserved bootstrap header space
+    times 13 db 0
 
 relocate:
-    ; On entry CS=07C0h, IP=0000h (verified from BootRom86.h).
-    ; Relocate all 512 bytes before accessing disk sectors which will
-    ; overwrite the original image at physical 07C00h.
     cli
     xor ax,ax
     mov ss,ax
-    mov sp,0x9000                 ; valid stack before CALL serial_putc
+    mov sp,0x9000             ; establish stack BEFORE calling putc
     push cs
     pop ds
-    ; Identify entry into the disk IPL, before relocation.
     mov dx,SER_STATUS
     mov al,0x4E
     out dx,al
     mov al,0x37
     out dx,al
     mov al,'I'
-    call serial_putc
+    call putc
     mov ax,0x0100
     mov es,ax
     xor si,si
     xor di,di
-    mov cx,0x0100
+    mov cx,256
     cld
     rep movsw
     jmp 0x0100:boot
 
 boot:
-    cli
     xor ax,ax
-    mov ss,ax
-    mov sp,0x9000
     mov ds,ax
-    cld
-    mov al,'R'                    ; relocation completed
-    call serial_putc
-    mov bx,RES_START               ; physical DMA destination
-    xor bp,bp                      ; cylinder
-    xor di,di                      ; head
-    mov si,3                       ; 1-based sector, after 512-byte IPL
-.next:
-    mov cx,si
-    mov ax,bp
-    mov ch,al
-    mov dx,di
-    mov dh,dl
-    call read_256
+    mov al,'R'
+    call putc
+    mov bx,0x4000             ; 8237 CH0 physical DMA destination
+    xor bp,bp                 ; cylinder
+    xor di,di                 ; head
+    mov si,3                  ; physical sector 3, after 512-byte IPL
+.loop:
+    call read256
     jnc .read_ok
-    jmp disk_error
+    mov al,'E'
+    call putc
+    jmp halt
 .read_ok:
-    mov al,'.'                    ; one character per loaded sector
-    call serial_putc
+    mov al,'.'
+    call putc
     add bx,256
-    cmp bx,RES_END
+    cmp bx,0x7E00             ; 62 sectors, 04000h..07DFFh
     je loaded
     inc si
     cmp si,17
-    jb .next
+    jb .loop
     mov si,1
     inc di
     cmp di,2
-    jb .next
+    jb .loop
     xor di,di
     inc bp
-    jmp .next
+    jmp .loop
 
 loaded:
-    mov ax,RES_SEG
+    mov ax,0x0400
     mov es,ax
-    cmp byte [es:RES_OFF],0xE9     ; real CBIOS vector opcode
-    jne vector_error
-    mov al,'J'                    ; jumping to CBIOS INIT
-    call serial_putc
-    jmp RES_SEG:RES_OFF
+    cmp byte [es:0x2500],0xE9
+    je .valid
+    mov al,'V'
+    call putc
+    jmp halt
+.valid:
+    mov al,'J'
+    call putc
+    jmp 0x0400:0x2500
 
-disk_error:
-    mov al,'E'                    ; disk transfer failed
-    call serial_putc
-    mov ax,bp                     ; cylinder
-    call hex_byte
-    mov al,':'
-    call serial_putc
-    mov ax,di                     ; head
-    call hex_byte
-    mov al,':'
-    call serial_putc
-    mov ax,si                     ; sector (1-based)
-    call hex_byte
-    jmp fail
-
-vector_error:
-    mov al,'V'                    ; CBIOS vector is not E9h
-    call serial_putc
-fail:
-    mov al,13
-    call serial_putc
-    mov al,10
-    call serial_putc
+halt:
     cli
-.halt:
+.again:
     hlt
-    jmp .halt
+    jmp .again
 
-; Entry: BX = bank-0 DMA physical address; CH = cylinder;
-; CL = physical sector 1..16; DH = side. Return CF=0 on success.
-; Preserves caller registers, so BX/BP/DI/SI survive the read.
-read_256:
+; Serial output does not disturb the load loop's registers.
+putc:
     push ax
-    push bx
-    push cx
     push dx
-    push si
-    mov si,dx                     ; preserve head in SI high byte
+    mov ah,al
+    mov dx,SER_STATUS
+.wait:
+    in al,dx
+    test al,1
+    jz .wait
+    mov dx,SER_DATA
+    mov al,ah
+    out dx,al
+    pop dx
+    pop ax
+    ret
+
+; BX=DMA destination (bank 0); BP=cylinder; DI=head; SI=sector.
+; Preserves BX/BP/DI/SI, clobbers AX/CX/DX.
+; Return CF=0 only when FDC succeeded and DMA terminal count asserted.
+read256:
     mov dx,DMA_MASK
     mov al,4
     out dx,al
@@ -165,40 +137,39 @@ read_256:
     xor al,al
     out dx,al
     mov dx,DMA_BANK
-    out dx,al                     ; DMA bank 0, physical < 0x10000
+    out dx,al
     mov dx,DMA_MODE
-    mov al,0x44                  ; CH0, single, I/O -> memory
+    mov al,0x44
     out dx,al
     mov dx,DMA_TC
-    in al,dx                     ; clear previous TC
+    in al,dx
     mov dx,FDC_TRACK
-    mov al,ch
-    out dx,al
-    inc dx                       ; sector
-    mov al,cl
-    out dx,al
-    mov dx,FDC_SIDE
+    mov ax,bp
+    out dx,al                 ; cylinder
+    inc dx
     mov ax,si
-    mov al,ah
-    out dx,al
-    inc dx                       ; drive 0
+    out dx,al                 ; sector
+    mov dx,FDC_SIDE
+    mov ax,di
+    out dx,al                 ; head
+    inc dx
     xor al,al
-    out dx,al
+    out dx,al                 ; drive 0
     mov dx,DMA_MASK
-    out dx,al                     ; unmask DMA CH0
+    out dx,al                 ; unmask DMA CH0
     mov dx,FDC_CMD
-    mov al,0x80                  ; physical READ SECTOR
-    out dx,al
+    mov al,0x80
+    out dx,al                 ; FDC READ
     mov cx,0xFFFF
 .poll:
     in al,dx
     test al,0x10
     jnz .bad
-    test al,0x02
-    jz .completed
+    test al,2
+    jz .complete
     loop .poll
     jmp .bad
-.completed:
+.complete:
     or al,al
     jnz .bad
     mov dx,DMA_TC
@@ -213,51 +184,9 @@ read_256:
     pushf
     mov dx,DMA_MASK
     mov al,4
-    out dx,al                     ; mask channel after transfer
-    popf
-    pop si
-    pop dx
-    pop cx
-    pop bx
-    pop ax
-    ret
-
-; Diagnostic console routines.  Retain all caller registers so the
-; DMA destination and CHS loop state cannot be affected by reporting.
-serial_putc:
-    push ax
-    push dx
-    mov ah,al
-    mov dx,SER_STATUS
-.wait:
-    in al,dx
-    test al,1
-    jz .wait
-    mov dx,SER_DATA
-    mov al,ah
     out dx,al
-    pop dx
-    pop ax
+    popf
     ret
 
-hex_byte:
-    push ax
-    shr al,1
-    shr al,1
-    shr al,1
-    shr al,1
-    call hex_nibble
-    pop ax
-    and al,0x0F
-    jmp hex_nibble
-hex_nibble:
-    and al,0x0F
-    cmp al,10
-    jb .digit
-    add al,'A'-10
-    jmp serial_putc
-.digit:
-    add al,'0'
-    jmp serial_putc
-
-times 0x200-($-$) db 0
+; The boot ROM loads two 256-byte sectors as one first-stage image.
+times 0x200-($-$$) db 0
