@@ -39,7 +39,7 @@ selftest_entry:
     cmp al,0
     je .status_ok
     cmp al,0xff
-    jne st_fail
+    ST_CHECK_EQ
 .status_ok:
     mov cl,'!'
     call CONOUT
@@ -229,7 +229,9 @@ selftest_entry:
     call SETDMA
     call READ
     or ax,ax
-    jnz st_restore_failed
+    jz .readback_ok
+    jmp st_restore_failed
+.readback_ok:
     mov ax,ST_SEG
     mov es,ax
     xor bx,bx
@@ -238,7 +240,9 @@ selftest_entry:
     mov al,bl
     xor al,0xa6
     cmp [es:bx+ST_CHECK],al
-    jne st_restore_failed
+    je .compare_ok
+    jmp st_restore_failed
+.compare_ok:
     inc bx
     loop .compare
 
@@ -258,7 +262,9 @@ st_restore_failed:
     call serial_puts
     call st_restore
     or ax,ax
-    jnz st_restore_bad
+    jz .restore_success
+    jmp st_restore_bad
+.restore_success:
     mov byte [st_dirty],0
     jmp st_fail
 
@@ -282,10 +288,14 @@ st_fail:
     mov si,st_fail_msg
     call serial_puts
     cmp byte [st_dirty],0
-    je st_halt
+    jne .need_restore
+    jmp st_halt
+.need_restore:
     call st_restore
     or ax,ax
-    jnz st_restore_bad
+    jz .restored
+    jmp st_restore_bad
+.restored:
     mov byte [st_dirty],0
 st_halt:
     cli
