@@ -1,40 +1,31 @@
 #!/usr/bin/env python3
-"""Keep CBIOS entry points independent of the calling program's DS."""
+"""Assert the original CP/M-86 BIOS calling convention is preserved.
+
+The FM-11 BIOS follows the source PC-98 CBIOS: INIT establishes DS=CS,
+and BIOS entry points use DS-relative work variables and DPH pointers.
+This test deliberately does not 'fix' such references by adding CS:
+overrides; an integration bug must be diagnosed in the emulator instead.
+"""
 from pathlib import Path
 import re
 
 source = Path("src/cbios.asm").read_text()
-start = source.index("\nHOME:\n") + 1
-end = source.index("; CP/M-86 128-byte record I/O", start)
-entry_points = source[start:end]
-tail_start = source.index("\nGETIOBF:\n") + 1
-tail_end = source.index("\nhello db", tail_start)
-entry_points += source[tail_start:tail_end]
+init = source.split("\nINIT:\n", 1)[1].split("\nWBOOT:\n", 1)[0]
+assert re.search(r"mov ax,cs\s+mov ss,ax\s+mov sp,BIOS_STACK\s+mov ds,ax", init)
 
 required = {
-    "HOME": ("cur_track",),
-    "SELDSK": ("cur_disk",),
-    "SETTRK": ("cur_track",),
-    "SETSEC": ("cur_sector",),
-    "SETDMA": ("dma_off",),
-    "SETDMAB": ("dma_seg",),
-    "GETIOBF": ("iobyte",),
-    "SETIOBF": ("iobyte",),
+    "HOME": ["mov word [cur_track],0"],
+    "SELDSK": ["mov bx,[dph_table+bx]", "mov [cur_disk],cl"],
+    "SETTRK": ["mov [cur_track],cx"],
+    "SETSEC": ["mov [cur_sector],cx"],
+    "SETDMA": ["mov [dma_off],cx"],
+    "SETDMAB": ["mov [dma_seg],cx"],
+    "GETIOBF": ["mov al,[iobyte]"],
+    "SETIOBF": ["mov [iobyte],cl"],
 }
-for name, variables in required.items():
-    match = re.search(rf"(?m)^{name}:\s*$([\s\S]*?)(?=^\w[\w.]*:|\Z)", entry_points, re.M)
-    assert match, f"Missing CBIOS entry point {name}"
-    body = match.group(1)
-    for var in variables:
-        assert re.search(rf"\[cs:{var}(?:\+\w+)?\]", body), (
-            f"{name} must access BIOS-owned {var} relative to CS, not caller DS"
-        )
-# SELDSK should not read the DPH address from an extra memory table.
-# A:..D: have fixed descriptors in the current resident image.
-sel_start = source.index("\nSELDSK:\n")
-sel_end = source.index("\nSETTRK:\n", sel_start)
-sel = source[sel_start:sel_end]
-for n in range(4):
-    assert re.search(rf"mov bx,dph{n}\b", sel), f"SELDSK must return dph{n} directly"
-assert "mov bx,[cs:dph_table+bx]" not in sel
-print("PASS CBIOS entry points use CS for BIOS-owned state and fixed DPH addresses")
+for name, lines in required.items():
+    match = re.search(rf"(?m)^{name}:\s*$([\s\S]*?)(?=^[A-Z][A-Z0-9_]*:|\Z)", source, re.M)
+    assert match, f"missing CBIOS entry point {name}"
+    for line in lines:
+        assert line in match.group(1), f"{name}: original ABI changed: {line}"
+print("PASS: original CBIOS DS-relative ABI and DPH table lookup preserved")
