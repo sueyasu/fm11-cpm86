@@ -3,6 +3,7 @@ NASM ?= nasm
 PYTHON ?= python3
 BUILD := build
 CPM86_CORE ?= external/system/cpm86_core.bin
+EXTERNAL_COMMANDS := $(sort $(wildcard external/commands/*.CMD external/commands/*.cmd))
 
 .PHONY: all check-tools check-core bios rom diag cbios-diag boot check test clean
 all: bios rom check
@@ -23,8 +24,9 @@ $(BUILD)/bootrom.bin: src/bootrom.asm | $(BUILD)
 $(BUILD)/iplrom.bin: src/iplrom.asm | $(BUILD)
 	$(NASM) -f bin $< -o $@
 
-$(BUILD)/fm11_cpm86_2d.img: $(BUILD)/cbios.bin tests/build_boot_2d.py $(CPM86_CORE) | $(BUILD)
-	$(PYTHON) tests/build_boot_2d.py --core $(CPM86_CORE) --cbios $(BUILD)/cbios.bin $@
+$(BUILD)/fm11_cpm86_2d.img: $(BUILD)/cbios.bin tests/build_boot_2d.py $(CPM86_CORE) $(EXTERNAL_COMMANDS) | $(BUILD)
+	$(PYTHON) tests/build_boot_2d.py --core $(CPM86_CORE) --cbios $(BUILD)/cbios.bin \
+		$(foreach f,$(EXTERNAL_COMMANDS),--file $(f)) $@
 
 boot: check-core $(BUILD)/iplrom.bin $(BUILD)/fm11_cpm86_2d.img
 
