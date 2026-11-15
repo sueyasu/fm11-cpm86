@@ -74,6 +74,14 @@ INIT:
     mov [dma_seg],cs
     mov si,hello
     call serial_puts
+
+    ; Match the CP/M-86 v1.1 cold-start ABI from pc98_cpm86:
+    ; BDOS CURDRV resides at offset 24B7h in the common system segment.
+    ; The CCP cold entry also expects the boot drive in CL.
+    ; We currently boot only from the Mini-FDC unit 0 (A:).
+    xor cx,cx
+    mov byte [cur_disk],cl
+    mov byte [0x24b7],cl
     sti
     jmp 0x0000           ; CCP cold entry in resident segment
 
