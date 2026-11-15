@@ -402,6 +402,7 @@ fdc_read:
     push cx
     push dx
     push si
+    mov bl,dh               ; save requested head before reusing DX for ports
     mov si,ax
     mov dx,0x1A
     mov al,4
@@ -433,7 +434,7 @@ fdc_read:
     mov al,cl
     out dx,al
     mov dx,0xFD1C
-    mov al,dh
+    mov al,bl               ; original head, NOT DH of port address FD1Ch
     out dx,al
     inc dx
     xor al,al
