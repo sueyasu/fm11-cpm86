@@ -107,7 +107,7 @@ def check(rom, bios_path):
         else:
             raise AssertionError("duplicate filename accepted")
 
-        invalid = root / "TOO-LONG.CMD"
+        invalid = root / "TOO-LONG9.CMD"  # nine-character stem (invalid 8.3)
         invalid.write_bytes(b"x")
         try:
             build_image(core, bios, [invalid])
