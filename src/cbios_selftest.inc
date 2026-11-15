@@ -24,6 +24,21 @@
 %%good:
 %endmacro
 
+%macro ST_DPH_EQ 3
+    cmp %2,%3
+    je %%good
+    push ax
+    mov ax,%2
+    mov [cs:st_dph_actual],ax
+    mov ax,%3
+    mov [cs:st_dph_expected],ax
+    pop ax
+    mov al,%1
+    mov [cs:st_dph_case],al
+    jmp st_fail_dph
+%%good:
+%endmacro
+
 ST_SEG    equ 0x0800
 ST_READ   equ 0x0100
 ST_SAVE   equ 0x0200
@@ -71,34 +86,20 @@ selftest_entry:
     xor cx,cx
     xor dx,dx
     call SELDSK
-    cmp bx,dph0
-    ST_CHECK_EQ
-    cmp word [bx+8],dirbuf
-    ST_CHECK_EQ
-    cmp word [bx+10],dpb_2d
-    ST_CHECK_EQ
-    cmp word [bx+12],csv0
-    ST_CHECK_EQ
-    cmp word [bx+14],alv0
-    ST_CHECK_EQ
-    cmp word [dpb_2d],32
-    ST_CHECK_EQ
-    cmp byte [dpb_2d+2],4
-    ST_CHECK_EQ
-    cmp byte [dpb_2d+3],15
-    ST_CHECK_EQ
-    cmp byte [dpb_2d+4],1
-    ST_CHECK_EQ
-    cmp word [dpb_2d+5],151
-    ST_CHECK_EQ
-    cmp word [dpb_2d+7],63
-    ST_CHECK_EQ
-    cmp byte [dpb_2d+9],0x80
-    ST_CHECK_EQ
-    cmp word [dpb_2d+11],16
-    ST_CHECK_EQ
-    cmp word [dpb_2d+13],4
-    ST_CHECK_EQ
+    ST_DPH_EQ 1, bx, dph0
+    ST_DPH_EQ 2, word [bx+8], dirbuf
+    ST_DPH_EQ 3, word [bx+10], dpb_2d
+    ST_DPH_EQ 4, word [bx+12], csv0
+    ST_DPH_EQ 5, word [bx+14], alv0
+    ST_DPH_EQ 6, word [dpb_2d], 32
+    ST_DPH_EQ 7, byte [dpb_2d+2], 4
+    ST_DPH_EQ 8, byte [dpb_2d+3], 15
+    ST_DPH_EQ 9, byte [dpb_2d+4], 1
+    ST_DPH_EQ 10, word [dpb_2d+5], 151
+    ST_DPH_EQ 11, word [dpb_2d+7], 63
+    ST_DPH_EQ 12, byte [dpb_2d+9], 0x80
+    ST_DPH_EQ 13, word [dpb_2d+11], 16
+    ST_DPH_EQ 14, word [dpb_2d+13], 4
     mov si,st_dph_ok
     call serial_puts
 
@@ -346,6 +347,25 @@ selftest_entry:
 
 ; Report the actual returned status (AX) and the failing condition.
 ; The original status is printed before any serial routine overwrites AX.
+; Report the exact SELDSK/DPH/DPB comparison that failed.
+; CS-relative diagnostic state also works if the caller's DS is wrong.
+st_fail_dph:
+    mov si,st_dph_bad
+    call serial_puts
+    mov al,[cs:st_dph_case]
+    call st_hex_byte
+    mov si,st_dph_actual_msg
+    call serial_puts
+    mov ax,[cs:st_dph_actual]
+    call st_hex_word
+    mov si,st_dph_expected_msg
+    call serial_puts
+    mov ax,[cs:st_dph_expected]
+    call st_hex_word
+    mov si,st_crlf
+    call serial_puts
+    jmp st_fail
+
 st_fail_ax:
     push ax
     call serial_puts
@@ -434,6 +454,12 @@ st_hex_nibble:
     add al,'0'
     jmp serial_putc
 
+st_dph_case db 0
+st_dph_actual dw 0
+st_dph_expected dw 0
+st_dph_bad db 'FAIL DPH CHECK #',0
+st_dph_actual_msg db ' ACTUAL=',0
+st_dph_expected_msg db ' EXPECTED=',0
 st_saved_iobyte db 0
 st_key db 0
 st_dirty db 0
