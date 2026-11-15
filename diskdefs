@@ -1,0 +1,25 @@
+# FM-11 CP/M-86 2D floppy, raw 320 KiB image.
+# Matches src/cbios.asm dpb_2d and tests/build_boot_2d.py.
+#
+# Physical: 40 cylinders, 2 sides, 16 sectors/side, 256 bytes/sector.
+# Raw order: cylinder 0 side 0, cylinder 0 side 1, cylinder 1 side 0, ...
+# CP/M:     80 side-tracks, 16 physical sectors/track (=32 x 128-byte records).
+# Reserved: first 4 side-tracks (16 KiB); directory begins at byte 0x4000.
+# Filesystem: 2048-byte blocks, 64 directory entries, one directory block.
+# No sector skew or per-image header.
+#
+# Read with:
+#   cpmls -f fm11-cpm86-2d -d diskdefs build/fm11_cpm86_2d.img
+#   cpmls -f fm11-cpm86-2d -d diskdefs -l build/fm11_cpm86_2d.img
+# Copy a file out (do not edit original while debugging):
+#   cpmcp -f fm11-cpm86-2d -d diskdefs build/fm11_cpm86_2d.img 0:ASM86.CMD .
+diskdef fm11-cpm86-2d
+  seclen 256
+  tracks 80
+  sectrk 16
+  blocksize 2048
+  maxdir 64
+  boottrk 4
+  skew 0
+  os 2.2
+end
