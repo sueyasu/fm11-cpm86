@@ -19,6 +19,19 @@ entry:
     xor ax,ax
     mov ss,ax
     mov sp,0x9000
+    ; The original FM-11 8088 boot ROM initializes the 8259 and
+    ; masks all IRQ sources (ICW1=1Bh, ICW2=08h, ICW4=09h,
+    ; OCW1=FFh) before booting an OS. The standalone CP/M IPL
+    ; replaces that ROM and must establish the same PIC state.
+    ; The Linux emulator's reset state otherwise leaves IRQs unmasked.
+    mov al,0x1b
+    out 0x00,al
+    mov al,0x08
+    out 0x01,al
+    mov al,0x09
+    out 0x01,al
+    mov al,0xff
+    out 0x01,al
     push cs
     pop ds
     mov dx,SER_STATUS
