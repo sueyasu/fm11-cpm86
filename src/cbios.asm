@@ -461,7 +461,7 @@ diag_dir_read:
     jmp .finish
 .under_limit:
     inc byte [dir_diag_count]
-    mov bl,al              ; save READ status (0=success, 1=error)
+    mov bx,ax              ; save complete READ status word
     mov si,diag_read_msg
     call serial_puts
     mov ax,[cur_track]
@@ -480,9 +480,9 @@ diag_dir_read:
     call diag_hex_word
     mov si,diag_status_msg
     call serial_puts
-    mov al,bl
-    call diag_hex_byte
-    test bl,bl
+    mov ax,bx
+    call diag_hex_word
+    test bx,bx
     jnz .newline
     mov si,diag_data_msg
     call serial_puts
@@ -552,7 +552,7 @@ diag_track_msg db 'DBG SETTRK=',0
 diag_read_msg db 'DBG READ T=',0
 diag_sec_msg db ' S=',0
 diag_dma_msg db ' DMA=',0
-diag_status_msg db ' AL=',0
+diag_status_msg db ' AX=',0
 diag_data_msg db ' DATA=',0
 diag_crlf db 13,10,0
 
