@@ -73,11 +73,11 @@ and FD06h (data), then prints single-character stage markers:
 - `R` — copied the IPL to `0100:0000` and entered the relocated code.
 - `.` — one 256-byte resident sector read succeeded; 62 dots expected.
 - `J` — confirmed the CBIOS E9h vector and about to jump to INIT.
-- `Ecc:hh:ss` — sector-read failure, 8-bit hexadecimal cylinder/head/
-  1-based sector values, for example `E00:00:03`.
+- `E` — sector-read failure (FDC status or DMA terminal-count check).
+  The compact 512-byte IPL omits hexadecimal CHS reporting to fit the boot sectors.
 - `V` — loaded CBIOS first vector byte is not E9h.
 
-The `E` / `V` cases append CR/LF and halt. `J` proceeds to the
+The `E` / `V` cases halt without further output. `J` proceeds to the
 CBIOS, so a later CBIOS banner should appear. To avoid consuming the
 first serial character, the IPL does **not** wait for terminal input.
 
