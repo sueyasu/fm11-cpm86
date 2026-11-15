@@ -57,11 +57,23 @@ entry:
     mov ds,ax
     mov es,ax
     mov byte [DIRTY_FLAG],0
-    ; RAM trampoline: CALL BX (FF D3), RETF (CB). The BIOS uses
-    ; near RET, so a direct far CALL from ROM would corrupt control flow.
-    mov byte [BIOS_GATE],0xFF
-    mov byte [BIOS_GATE+1],0xD3
-    mov byte [BIOS_GATE+2],0xCB
+    ; Cross-segment near-call gate, using 8086 PUSH/RET rather than
+    ; indirect FF-group CALL.  CBIOS returns with a near RET.
+    ; 7100: PUSH BP            save BP
+    ; 7101: MOV BP,7107h      post-CBIOS continuation
+    ; 7104: PUSH BP            near return address
+    ; 7105: PUSH BX            CBIOS vector (0000:25xx)
+    ; 7106: RET                transfer to CBIOS without FF opcode
+    ; 7107: POP BP
+    ; 7108: RETF               return to ROM caller
+    mov byte [BIOS_GATE],0x55
+    mov byte [BIOS_GATE+1],0xBD
+    mov word [BIOS_GATE+2],BIOS_GATE+7
+    mov byte [BIOS_GATE+4],0x55
+    mov byte [BIOS_GATE+5],0x53
+    mov byte [BIOS_GATE+6],0xC3
+    mov byte [BIOS_GATE+7],0x5D
+    mov byte [BIOS_GATE+8],0xCB
     mov dx,SER_STATUS
     mov al,0x4E
     out dx,al
@@ -111,6 +123,8 @@ entry:
 
     mov si,msg_loaded
     call puts
+    mov si,msg_sel
+    call puts
 
     ; Initialize CP/M disk state without invoking INIT, which jumps to
     ; the as-yet-unloaded CCP/BDOS core.
@@ -120,6 +134,8 @@ entry:
     call bios_call
     or bx,bx
     FAIL_Z
+    mov si,msg_sel_ok
+    call puts
     mov cx,2                ; track 2 = cylinder 1, side 0
     mov bx,BIOS_SETTRK
     call bios_call
@@ -127,6 +143,8 @@ entry:
     mov bx,BIOS_SETDMAB
     call bios_call
 
+    mov si,msg_read_start
+    call puts
     ; Read logical record 0 into RECORD0.
     xor cx,cx
     mov bx,BIOS_SETSEC
@@ -138,6 +156,8 @@ entry:
     call bios_call
     or al,al
     FAIL_NZ
+    mov si,msg_record0
+    call puts
     mov si,RECORD0
     mov ah,0x5A
     call verify_record
@@ -154,6 +174,8 @@ entry:
     call bios_call
     or al,al
     FAIL_NZ
+    mov si,msg_record1
+    call puts
     mov si,RECORD1
     mov ah,0xA5
     call verify_record
@@ -173,6 +195,8 @@ entry:
     inc bx
     loop .fill
 
+    mov si,msg_write_start
+    call puts
     ; Mark scratch as possibly modified before issuing WRITE. Always
     ; attempt to restore the original first half after this point.
     mov byte [DIRTY_FLAG],1
@@ -248,8 +272,8 @@ stop:
     jmp stop
 
 ; Invoke BX=CBIOS vector via RAM gate in segment 0000h.
-; The gate executes near CALL BX, then RETF to this ROM.  It preserves
-; all registers except those modified by the called BIOS function.
+; Gate uses PUSH BP / MOV BP,continuation / PUSH BP / PUSH BX / RET,
+; then POP BP / RETF. It does not modify AX or the BIOS return value.
 bios_call:
     mov ax,cs
     push ax                 ; far return CS = ROM segment FF00h
@@ -417,6 +441,12 @@ putc:
     ret
 
 msg_start       db 'CBIOS 128-byte record test',13,10,0
+msg_sel         db 'STEP: SELDSK',13,10,0
+msg_sel_ok      db 'STEP: SELDSK OK',13,10,0
+msg_read_start  db 'STEP: READ record 0',13,10,0
+msg_record0     db 'STEP: READ record 0 returned',13,10,0
+msg_record1     db 'STEP: READ record 1 returned',13,10,0
+msg_write_start db 'STEP: WRITE record 0',13,10,0
 msg_loaded      db 'CBIOS loaded from 2D disk',13,10,0
 msg_read        db 'PASS: records 0 and 1 read',13,10,0
 msg_pass        db 'PASS: WRITE, RMW, verify, restore',13,10,0
