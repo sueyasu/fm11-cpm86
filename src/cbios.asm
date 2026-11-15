@@ -83,7 +83,11 @@ INIT:
     mov byte [cur_disk],cl
     mov byte [0x24b7],cl
     sti
+%ifdef CBIOS_SELFTEST
+    jmp selftest_entry   ; diagnostic build: never enter CCP/BDOS
+%else
     jmp 0x0000           ; CCP cold entry in resident segment
+%endif
 
 WBOOT:
     jmp 0x0006           ; provisional: disk reload not implemented
@@ -527,5 +531,9 @@ mrt:
     db 1
     dw 0x0800,0x7800
 
+%ifdef CBIOS_SELFTEST
+%include "src/cbios_selftest.inc"
+%endif
+
 ; Pad to the fixed 0x1900-byte CBIOS image size.
-times BIOS_SIZE - ($ - $$) db 0
+times BIOS_SIZE - ($ - $) db 0
