@@ -135,8 +135,13 @@ entry:
     call puts
     jmp stop
 .first_ok:
+    ; SI is the loader's next physical sector number.  The message
+    ; pointer must not overwrite it (otherwise subsequent DMA reads
+    ; silently load the wrong sectors and corrupt the DPH table).
+    push si
     mov si,msg_first_ok
     call puts
+    pop si
 .next_buffer:
     add bp,256
     inc si
