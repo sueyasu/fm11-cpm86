@@ -333,6 +333,8 @@ fdc2d_transfer:
     push dx
     push si
     push di
+    push bp
+    mov bp,dx                ; preserve head in DH before DX becomes I/O port
 
     mov bx,ax                ; BL=drive, BH=8237 mode
     cmp bl,0                 ; emulator Mini FDC currently selects unit 0
@@ -397,7 +399,8 @@ fdc2d_transfer:
     mov al,cl
     out dx,al
     mov dx,0xfd1c           ; FD1C: side
-    mov al,dh
+    mov ax,bp                ; original caller DH, not port high byte FDh
+    mov al,ah
     out dx,al
     inc dx                  ; FD1D: physical drive
     mov al,bl
@@ -447,6 +450,7 @@ fdc2d_transfer:
 .bad:
     stc
 .restore:
+    pop bp
     pop di
     pop si
     pop dx
