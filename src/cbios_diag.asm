@@ -127,15 +127,19 @@ entry:
     ; Verify that the *loaded* CBIOS vector dispatches into the expected
     ; 8086 SELDSK prologue. FDC TC alone cannot prove transferred bytes.
     cmp byte [BIOS_SELDSK],0xE9
-    jne invalid_bios
+    jne .bad_vector
     mov bx,[BIOS_SELDSK+1]   ; signed near-JMP displacement
     add bx,BIOS_SELDSK+3
     cmp bx,BIOS_BASE
-    jb invalid_bios
+    jb .bad_vector
     cmp bx,BIOS_BASE+BIOS_BYTES-2
-    ja invalid_bios
+    ja .bad_vector
     cmp word [bx],0xDB31    ; xor bx,bx: first instruction of SELDSK
-    jne invalid_bios
+    jne .bad_vector
+    jmp short .vector_ok
+.bad_vector:
+    jmp invalid_bios
+.vector_ok:
     mov si,msg_vector_ok
     call puts
     mov si,msg_sel
