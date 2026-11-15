@@ -341,13 +341,19 @@ diag_dir_read:
     push es
     ; BP bit 8 records the original READ/WRITE direction.
     test bp,0x0100
-    jnz .finish
+    jz .read_operation
+    jmp .finish             ; 8086 conditional jumps are short-only
+.read_operation:
     push cs
     pop ds
     cmp word [cur_track],4
-    jne .finish
+    je .track_four
+    jmp .finish
+.track_four:
     cmp byte [dir_diag_count],8
-    jae .finish
+    jb .under_limit
+    jmp .finish
+.under_limit:
     inc byte [dir_diag_count]
     mov bl,al              ; save READ status (0=success, 1=error)
     mov si,diag_read_msg
