@@ -220,10 +220,10 @@ selftest_entry:
 
     mov cx,ST_WRITE
     call SETDMA
+    mov byte [st_dirty],1  ; failure may occur after a partial disk write
     call WRITE
     or ax,ax
     ST_CHECK_Z
-    mov byte [st_dirty],1
 
     mov cx,ST_CHECK
     call SETDMA
