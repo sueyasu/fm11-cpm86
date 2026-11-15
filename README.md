@@ -1,7 +1,8 @@
 # FM-11 CP/M-86 v1.1 port
 
 This project is an initial port of CP/M-86 to the Fujitsu FM-11's 8088
-main CPU card (or NEC V20 replacement). It is **not yet bootable**.
+main CPU card (or NEC V20 replacement). A first-stage 2D IPL ROM and
+image builder are available, but **successful OS boot has not yet been verified**.
 
 ## References
 
@@ -25,8 +26,8 @@ The first commit provides:
   transfers to FF00:0000, prints one line to the serial interface and halts.
 - Build and layout checks. No generated or proprietary binaries are committed.
 
-Disk BIOS entries currently return errors or no installed drives; they must
-not be used to access a real disk. The diagnostic ROM does not load CP/M-86.
+The original `bootrom.bin` remains a serial-only diagnostic. The separate
+CBIOS integration diagnostic has passed READ/WRITE/RMW tests in the emulator.
 
 ## Build
 
@@ -178,14 +179,64 @@ CBIOS `READ`/`WRITE`, not just direct FDC register access. The
 serial output, not the static `make test` result, establishes whether
 the emulated FDC, DMA, and CBIOS work together.
 
+## Experimental CP/M-86 2D cold boot
+
+The new `src/iplrom.asm` reads **62 contiguous physical sectors**
+(256 bytes each) from Mini-FDC drive 0, starting at C0/H0/S1. It
+loads the 0x3E00-byte resident image into segment `0800h`, checks
+the CBIOS jump-vector opcode at `0800:2500`, and transfers to CBIOS
+`INIT`. The resident consists of a separately supplied CP/M-86
+CCP/BDOS core (0x2500 bytes) followed by `build/cbios.bin` (0x1900
+bytes). Neither the proprietary core nor its binaries are committed.
+
+Provide the external core at `external/system/cpm86_core.bin`
+(or set `CPM86_CORE` in the make invocation):
+
+```sh
+make test            # checks assembly/geometry, needs no external core
+make boot            # requires a real 0x2500-byte core
+```
+
+`make boot` generates `build/iplrom.bin` (4 KiB reset ROM) and
+`build/fm11_cpm86_2d.img` (320 KiB, raw 2D). If the core is not
+available, the ROM alone can be assembled with `make build/iplrom.bin`.
+The first **four** logical side-tracks (two cylinders, 16 KiB) are
+reserved for the resident image; the empty CP/M directory starts
+at physical cylinder 2. Corresponding DPB parameters are `OFF=4`,
+`DSM=151`. The last 512 bytes of the system area are left erased.
+
+Start the SDL frontend with the 8088 main CPU selected, an installed
+6809 card for the current floppy-mounting frontend, and:
+
+```sh
+fm11-sdl --main-rom /path/to/boot6809.bin \\
+  --8088-rom build/iplrom.bin \\
+  --floppy2d build/fm11_cpm86_2d.img --floppy-drive 0
+```
+
+As with the diagnostics, connect to the announced `Serial PTY:`
+with `screen /dev/pts/N` and press any key to start the ROM.
+A successful *loader* should emit:
+
+```text
+FM-11 CP/M-86 2D IPL: loading resident
+FM-11 CP/M-86 IPL: CBIOS vector OK, entering INIT
+FM-11 CP/M-86 BIOS: serial initialized
+```
+
+Only the first two messages establish that the IPL reached CBIOS.
+Whether CCP/BDOS subsequently reaches a usable CP/M prompt remains
+untested. `INIT`, `WBOOT`, the provisional memory-region table,
+filesystem operations, and interrupt-vector conventions need
+end-to-end verification. Avoid using valuable media: this is
+experimental firmware, and the CBIOS supports write operations.
+
 ## Next milestones
 
-1. Confirm 8088 ROM reset and serial console on `fm11-sdl`/romtrace.
-2. Implement FM-11 floppy IPL and direct 8088 8237/FD18 or FD30 disk transfer
-   with correct controller and DMA bank/sector semantics.
-3. Complete CBIOS SELDSK, READ/WRITE, 128-byte deblocking and drive tables.
-4. Combine the externally supplied CP/M-86 CCP/BDOS core and CBIOS into a
-   bootable 2D/2HD D88 image using a format-specific image builder.
-5. Verify cold/warm boot, console, file I/O and standard CP/M-86 commands.
+1. Verify the experimental IPL boots the external core to a CP/M-86 prompt.
+2. Fix any remaining INIT/WBOOT/memory-region and CCP/BDOS ABI issues.
+3. Validate CP/M directory and file I/O on disposable 2D media.
+4. Add standard D88 output and additional drive/2HD hardware support.
+5. Test warm boot, standard CP/M commands, and real FM-11 hardware.
 
 See `docs/architecture.md` for hardware boundaries and open questions.
