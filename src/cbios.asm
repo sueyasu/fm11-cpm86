@@ -159,7 +159,7 @@ serial_puts:
     ret
 
 HOME:
-    mov word [cur_track],0
+    mov word [cs:cur_track],0
     ret
 
 SELDSK:
@@ -173,25 +173,25 @@ SELDSK:
     xor ch,ch
     mov bx,cx
     shl bx,1
-    mov bx,[dph_table+bx]
-    mov [cur_disk],cl
+    mov bx,[cs:dph_table+bx]
+    mov [cs:cur_disk],cl
 .absent:
     ret
 
 SETTRK:
-    mov [cur_track],cx
+    mov [cs:cur_track],cx
     ret
 
 SETSEC:
-    mov [cur_sector],cx
+    mov [cs:cur_sector],cx
     ret
 
 SETDMA:
-    mov [dma_off],cx
+    mov [cs:dma_off],cx
     ret
 
 SETDMAB:
-    mov [dma_seg],cx
+    mov [cs:dma_seg],cx
     ret
 
 ; CP/M-86 128-byte record I/O for Mini FDC (2D).
@@ -344,11 +344,11 @@ GETSEGT:
     ret
 
 GETIOBF:
-    mov al,[iobyte]
+    mov al,[cs:iobyte]
     ret
 
 SETIOBF:
-    mov [iobyte],cl
+    mov [cs:iobyte],cl
     ret
 
 hello db 'FM-11 CP/M-86 BIOS: serial initialized',13,10,0
