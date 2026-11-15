@@ -9,8 +9,8 @@ org 0
 
 SER_DATA    equ 0xFD06
 SER_STATUS  equ 0xFD07
-RES_SEG     equ 0x0800
-RES_PHYS    equ 0x8000
+RES_SEG     equ 0x0400
+RES_PHYS    equ 0x4000
 RES_SECTORS equ 62
 BIOS_ENTRY  equ 0x2500
 
@@ -18,7 +18,7 @@ entry:
     cli
     xor ax,ax
     mov ss,ax
-    mov sp,0x7000
+    mov sp,0x9000
     push cs
     pop ds
     mov dx,SER_STATUS
@@ -46,7 +46,7 @@ entry:
     mov si,1                ; sector, 1-based
 .load:
     ; Read one physical 256-byte sector into low memory.  BIOS itself is
-    ; assembled with ORG 2500h and will execute from segment 0800h.
+    ; assembled with ORG 2500h and will execute from segment 0400h.
     mov cx,si               ; CL = sector
     mov ax,bp
     mov ch,al               ; CH = cylinder
