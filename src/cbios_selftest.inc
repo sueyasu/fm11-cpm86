@@ -156,6 +156,22 @@ selftest_entry:
     mov word [st_rw_track_bx],0xffff
     mov word [st_rw_track_flags],0xffff
     mov word [st_rw_done_ax],0xffff
+    ; Snapshot the actual first bytes of the target in memory, not
+    ; merely the assembler label. A wrong load/relocation can otherwise
+    ; look like a broken CALL/JAE implementation.
+    mov ax,cs
+    mov [st_read_cs],ax
+    mov ax,READ
+    mov [st_read_off],ax
+    mov al,[cs:READ]
+    mov [st_read_code],al
+    mov al,[cs:READ+1]
+    mov [st_read_code+1],al
+    mov al,[cs:READ+2]
+    mov [st_read_code+2],al
+    mov al,[cs:READ+3]
+    mov [st_read_code+3],al
+    mov ax,0x5a5a          ; distinguishes an unexecuted/no-op CALL
     call READ
     cmp ax,1
     je .invalid_track_ok
@@ -166,6 +182,24 @@ selftest_entry:
     call serial_puts
     pop ax
     call st_hex_word
+    mov si,st_trace_target
+    call serial_puts
+    mov ax,[st_read_cs]
+    call st_hex_word
+    mov al,':'
+    call serial_putc
+    mov ax,[st_read_off]
+    call st_hex_word
+    mov si,st_trace_code
+    call serial_puts
+    mov al,[st_read_code]
+    call st_hex_byte
+    mov al,[st_read_code+1]
+    call st_hex_byte
+    mov al,[st_read_code+2]
+    call st_hex_byte
+    mov al,[st_read_code+3]
+    call st_hex_byte
     mov si,st_trace_entry
     call serial_puts
     mov al,[st_rw_entry]
@@ -405,6 +439,9 @@ st_key db 0
 st_dirty db 0
 st_rw_entry db 0
 st_rw_ds dw 0xffff
+st_read_cs dw 0xffff
+st_read_off dw 0xffff
+st_read_code times 4 db 0xff
 ; Observation slots used only by the CBIOS_SELFTEST code path.
 st_rw_track_bx dw 0xffff
 st_rw_track_flags dw 0xffff
@@ -417,6 +454,8 @@ st_dph_ok db 'PASS SELDSK/DPH/DPB',13,10,0
 st_set_ok db 'PASS SETTRK/HOME/SETSEC/SETDMA/SETDMAB/SECTRAN/GETSEGT',13,10,0
 st_limits_ok db 'PASS READ invalid track/record',13,10,0
 st_bad_track db 'FAIL READ track=80 returned AX=',0
+st_trace_target db ' TARGET=',0
+st_trace_code db ' CODE=',0
 st_trace_entry db ' ENTRY=',0
 st_trace_ds db ' DS=',0
 st_trace_bx db ' BX=',0
