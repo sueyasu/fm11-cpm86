@@ -124,24 +124,42 @@ entry:
     mov si,msg_loaded
     call puts
 
-    ; Verify that the *loaded* CBIOS vector dispatches into the expected
-    ; 8086 SELDSK prologue. FDC TC alone cannot prove transferred bytes.
-    cmp byte [BIOS_SELDSK],0xE9
-    jne .bad_vector
-    mov bx,[BIOS_SELDSK+1]   ; signed near-JMP displacement
+    ; Report actual loaded bytes, rather than treating successful DMA
+    ; terminal count as proof that the correct CBIOS image arrived.
+    mov si,msg_vector
+    call puts
+    mov si,BIOS_SELDSK
+    mov cx,3
+    call hex_dump
+    mov si,msg_target
+    call puts
+    mov bx,[BIOS_SELDSK+1]
     add bx,BIOS_SELDSK+3
+    mov ax,bx
+    call hex_word
+    mov al,' '
+    call putc
     cmp bx,BIOS_BASE
     jb .bad_vector
     cmp bx,BIOS_BASE+BIOS_BYTES-2
     ja .bad_vector
-    cmp word [bx],0xDB31    ; xor bx,bx: first instruction of SELDSK
+    mov si,bx
+    mov cx,2
+    call hex_dump
+    mov si,msg_crlf
+    call puts
+
+    ; Match the two-byte 8086 SELDSK prologue and the jump opcode.
+    cmp byte [BIOS_SELDSK],0xE9
     jne .bad_vector
+    cmp word [bx],0xDB31
+    jne .bad_vector
+    mov si,msg_vector_ok
+    call puts
     jmp short .vector_ok
 .bad_vector:
     jmp invalid_bios
 .vector_ok:
-    mov si,msg_vector_ok
-    call puts
     mov si,msg_sel
     call puts
 
@@ -431,6 +449,56 @@ fdc_read:
     pop ax
     ret
 
+; Print a hex byte from AL, preserving the other general registers.
+hex_byte:
+    push ax
+    push bx
+    mov bl,al
+    shr al,1
+    shr al,1
+    shr al,1
+    shr al,1
+    call hex_nibble
+    mov al,bl
+    and al,15
+    call hex_nibble
+    pop bx
+    pop ax
+    ret
+hex_nibble:
+    cmp al,10
+    jb .digit
+    add al,'A'-10
+    jmp putc
+.digit:
+    add al,'0'
+    jmp putc
+
+; AX = word to print, high byte first.
+hex_word:
+    push ax
+    mov al,ah
+    call hex_byte
+    pop ax
+    call hex_byte
+    ret
+
+; DS:SI points to CX bytes.
+hex_dump:
+    push ax
+    push cx
+    push si
+.next:
+    lodsb
+    call hex_byte
+    mov al,' '
+    call putc
+    loop .next
+    pop si
+    pop cx
+    pop ax
+    ret
+
 ; ROM strings are located in CS, while the BIOS requires DS=0000h.
 puts:
     push ds
@@ -465,6 +533,9 @@ putc:
 
 msg_start       db 'CBIOS 128-byte record test',13,10,0
 msg_sel         db 'STEP: SELDSK',13,10,0
+msg_vector      db 'SELDSK vector: ',0
+msg_target      db 13,10,'Target: ',0
+msg_crlf        db 13,10,0
 msg_vector_ok   db 'PASS: SELDSK vector and target bytes',13,10,0
 msg_invalid_bios db 'FAIL: CBIOS SELDSK vector/target content',13,10,0
 msg_sel_ok      db 'STEP: SELDSK OK',13,10,0
