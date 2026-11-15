@@ -1,7 +1,7 @@
 ; FM-11 8088 Mini-FDC CP/M-86 disk loader ROM (bring-up).
 ; Dedicated raw 2D media, C0/H0/S1 onward, 62 x 256-byte sectors.
 ; Resident image = 0x2500-byte external core + 0x1900-byte FM-11 CBIOS.
-; Loaded at 0800:0000, BIOS INIT entry at 0800:2500.
+; Loaded at 0400:0000, BIOS INIT entry at 0400:2500.
 ; First stage waits for one serial byte so SDL PTY users can attach.
 cpu 8086
 bits 16
