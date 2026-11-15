@@ -65,10 +65,20 @@ INIT:
     mov ax,cs
     mov word [BDOS_INT*4+2],ax
     pop ds
+    ; The original FM-11 emulator's 8251 may still be in command mode
+    ; when the disk IPL transfers control here. Synchronize its
+    ; mode/command state before initializing the serial console.
+    ; Use the same sequence as the now-working disk IPL.
     mov dx,SER_STATUS
+    xor al,al
+    out dx,al
+    out dx,al
+    out dx,al
+    mov al,0x40           ; 8251 internal reset
+    out dx,al
     mov al,0x4E           ; asynchronous, 8 data bits, no parity, 1 stop
     out dx,al
-    mov al,0x37           ; receive/transmit enabled; no interrupt reliance
+    mov al,0x37           ; enable receive/transmit, reset errors
     out dx,al
     mov word [cur_track],0
     mov word [cur_sector],0
