@@ -59,7 +59,7 @@ INIT:
     push ds
     xor ax,ax
     mov ds,ax
-    mov word [BDOS_INT*4],BDOS_OFFSET
+    mov word [BDOS_INT*4],diag_bdos_int
     mov ax,cs
     mov word [BDOS_INT*4+2],ax
     pop ds
@@ -73,6 +73,7 @@ INIT:
     mov byte [input_diag_count],0
     mov byte [output_diag_count],0
     mov byte [output_diag_active],0
+    mov byte [bdos_diag_count],0
     mov word [cur_track],0
     mov word [cur_sector],0
     mov word [dma_off],0x0080
@@ -326,6 +327,47 @@ rw_2d:
 ; ----------------------------------------------------------------------
 ; Trace the first 64 bytes returned to CCP by CONIN, including CR/LF.
 ; Uses direct serial output; preserves AL, all other registers and flags.
+; Trace BDOS functions invoked after a console CR.  The interrupt
+; wrapper preserves every modified register and the original interrupt
+; stack frame, then transfers directly to the unmodified BDOS entry.
+; This is a diagnostic only: remove before a release build.
+diag_bdos_int:
+    pushf
+    push ax
+    push bx
+    push cx
+    push dx
+    push si
+    push ds
+    push cs
+    pop ds
+    cmp byte [output_diag_active],0
+    je .dispatch
+    cmp byte [bdos_diag_count],32
+    jae .dispatch
+    inc byte [bdos_diag_count]
+    mov bx,cx                ; CL is the BDOS function number
+    mov si,diag_bdos_msg
+    call serial_puts
+    mov ax,bx
+    call diag_hex_word
+    mov si,diag_bdos_dx_msg
+    call serial_puts
+    mov ax,dx
+    call diag_hex_word
+    mov si,diag_crlf
+    call serial_puts
+.dispatch:
+    pop ds
+    pop si
+    pop dx
+    pop cx
+    pop bx
+    pop ax
+    popf
+    ; Far JMP, not CALL: original INT E0 stack frame is still intact.
+    jmp 0x0400:BDOS_OFFSET
+
 ; Keep a bounded trace of actual CCP output after Enter.  The
 ; diagnostic's own serial_puts does not call the CONOUT BIOS vector.
 ; This leaves AL/AX, BX, CX, DX, SI, DS, flags untouched.
@@ -398,6 +440,7 @@ diag_conin_byte:
     jne .not_cr
     mov byte [output_diag_active],1
     mov byte [output_diag_count],0
+    mov byte [bdos_diag_count],0
 .not_cr:
     mov si,diag_crlf
     call serial_puts
@@ -547,6 +590,8 @@ diag_hex_nibble:
 
 diag_input_msg db 'DBG CONIN=',0
 diag_output_msg db 'DBG CONOUT=',0
+diag_bdos_msg db 'DBG BDOS CX=',0
+diag_bdos_dx_msg db ' DX=',0
 diag_wboot_msg db 'DBG WBOOT entered',13,10,0
 diag_track_msg db 'DBG SETTRK=',0
 diag_read_msg db 'DBG READ T=',0
@@ -580,6 +625,7 @@ dir_diag_track_count db 0
 input_diag_count db 0
 output_diag_count db 0
 output_diag_active db 0
+bdos_diag_count db 0
 cur_track dw 0
 cur_sector dw 0
 dma_off dw 0x80
