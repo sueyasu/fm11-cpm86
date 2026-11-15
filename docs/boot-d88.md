@@ -40,23 +40,26 @@ The disk IPL loads 62 sectors from C0/H0/S3 onward into physical RAM
 CBIOS is still assembled at ORG 2500h, and its DPB OFF=4 and all file
 allocation values are unchanged.
 
-## Important boot-ROM assumption
+## Original emulator 8088 ROM compatibility (v128)
 
-**The disk IPL is written under the explicit assumption that the
-original FM-11 8088 boot ROM loads C0/H0/S1-S2 (512 bytes) into
-physical 0000:0400 and jumps to 0000:0400.** This is not verified
-against the specific original emulator/8088 ROM in use. The known FM-11
-6809 2D boot ROM follows the 512-byte-at-0400 convention, but it does
-not establish identical behavior for 8088 boot ROMs. If the original
-8088 ROM uses a different bootstrap entry location, first-stage load
-length, or disk-header convention, the IPL must be adapted.
+Inspection of the uploaded original emulator source (`Fm11/BootRom86.h`,
+v128) shows its floppy boot code performs a far jump to **`07C0:0000`**
+(physical `07C00h`) after loading the floppy bootstrap, not to the
+`0000:0400` address used by the 6809 ROM. In the previous version this
+entry-point mismatch prevented correct startup.
 
-The disk IPL uses the same 8237 DMA and Mini-FDC I/O ports already
-used by the working experimental 8088 ROM loader, but its successful
-execution on the original emulator has **not** been demonstrated.
-Using the D88 alone cannot guarantee correct boot if the original
-emulator or ROM uses different FDC/DMA behavior.
+The revised disk IPL starts at offset zero in the loaded segment, copies
+its full 512 bytes to `0100:0000` (physical `01000h`), and jumps there
+**before** reading the following 62 physical sectors into
+`0400:0000`...`0400:3DFF`. Without relocation, the last two resident
+sectors would overwrite the running IPL at physical `07C00h`.
 
-The build target verifies D88 geometry, sector payload round-trips,
-exact resident positioning and preservation of the CP/M filesystem.
-These structural tests do not constitute a runtime boot test.
+The image still uses the same 8237 DMA / Mini-FDC interfaces as the
+experimental 8088 loader, and its disk geometry matches the original
+emulator's D88 parser (`MainCpu.cpp`, `MainCpu.h`). It has not yet been
+executed on the uploaded original emulator, so this is a source-level
+compatibility fix rather than a confirmed successful boot.
+
+The build target checks D88 geometry, sector payload round-trips, exact
+resident placement and preservation of the CP/M filesystem. These
+structural checks do not constitute a runtime boot test.
