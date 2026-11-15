@@ -18,10 +18,13 @@ $(BUILD):
 $(BUILD)/cbios.bin: src/cbios.asm | $(BUILD)
 	$(NASM) -f bin $< -o $@
 
-# Self-test variant: same 21 entry vectors/CBIOS code, but INIT runs
-# embedded diagnostics instead of entering CCP/BDOS.
-$(BUILD)/cbios_selftest.bin: src/cbios.asm src/cbios_selftest.inc | $(BUILD)
-	$(NASM) -DCBIOS_SELFTEST=1 -f bin $< -o $@
+# Link the self-test into the CCP/BDOS-sized core region. Keep the
+# actual CBIOS at exactly 0x1900 bytes, preserving the normal IPL layout.
+$(BUILD)/cbios_selftest_resident.bin: src/cbios_selftest_resident.asm src/cbios.asm src/cbios_selftest.inc | $(BUILD)
+	$(NASM) -f bin $< -o $@
+
+$(BUILD)/cbios_selftest_core.bin $(BUILD)/cbios_selftest.bin &: $(BUILD)/cbios_selftest_resident.bin tests/split_selftest_resident.py
+	$(PYTHON) tests/split_selftest_resident.py $(BUILD)/cbios_selftest_resident.bin $(BUILD)/cbios_selftest_core.bin $(BUILD)/cbios_selftest.bin
 
 $(BUILD)/bootrom.bin: src/bootrom.asm | $(BUILD)
 	$(NASM) -f bin $< -o $@
@@ -39,12 +42,12 @@ boot: check-core $(BUILD)/iplrom.bin $(BUILD)/fm11_cpm86_2d.img
 # ASM86.CMD is fixed as the first entry for the READ-data assertion.
 SELFTEST_ASM86 := $(firstword $(wildcard external/commands/ASM86.CMD external/commands/asm86.cmd))
 
-$(BUILD)/fm11_cpm86_selftest_2d.img: $(BUILD)/cbios_selftest.bin tests/build_boot_2d.py $(CPM86_CORE) $(SELFTEST_ASM86) | $(BUILD)
+$(BUILD)/fm11_cpm86_selftest_2d.img: $(BUILD)/cbios_selftest_core.bin $(BUILD)/cbios_selftest.bin tests/build_boot_2d.py $(SELFTEST_ASM86) | $(BUILD)
 	@test -n "$(SELFTEST_ASM86)" || { echo "missing external/commands/ASM86.CMD for self-test" >&2; exit 1; }
-	$(PYTHON) tests/build_boot_2d.py --core $(CPM86_CORE) --cbios $(BUILD)/cbios_selftest.bin \
+	$(PYTHON) tests/build_boot_2d.py --core $(BUILD)/cbios_selftest_core.bin --cbios $(BUILD)/cbios_selftest.bin \
 		--file "$(SELFTEST_ASM86)" $@
 
-selftest: check-core $(BUILD)/iplrom.bin $(BUILD)/fm11_cpm86_selftest_2d.img
+selftest: $(BUILD)/iplrom.bin $(BUILD)/fm11_cpm86_selftest_2d.img
 	$(PYTHON) tests/check_layout.py $(BUILD)/cbios_selftest.bin $(BUILD)/iplrom.bin
 	@echo "SELFTEST: boot with build/iplrom.bin and build/fm11_cpm86_selftest_2d.img"
 	@echo "WARNING: self-test writes/restores the last record; use only this disposable image."
