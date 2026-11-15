@@ -111,6 +111,33 @@ entry:
     jnc .loaded_sector
     jmp load_failed
 .loaded_sector:
+    ; Verify the very first 256-byte DMA transfer before proceeding.
+    ; The CBIOS image starts with an E9 near-JMP vector at 0000:2500.
+    cmp bp,BIOS_BASE
+    jne .next_buffer
+    cmp byte [BIOS_BASE],0xE9
+    je .first_ok
+    mov si,msg_first_bad
+    call puts
+    mov si,msg_ram_bios
+    call puts
+    mov si,BIOS_BASE
+    mov cx,16
+    call hex_dump
+    mov si,msg_crlf
+    call puts
+    mov si,msg_ram_2000
+    call puts
+    mov si,0x2000
+    mov cx,16
+    call hex_dump
+    mov si,msg_crlf
+    call puts
+    jmp stop
+.first_ok:
+    mov si,msg_first_ok
+    call puts
+.next_buffer:
     add bp,256
     inc si
     cmp si,17
@@ -532,6 +559,10 @@ putc:
     ret
 
 msg_start       db 'CBIOS 128-byte record test',13,10,0
+msg_first_ok    db 'PASS: first CBIOS DMA sector',13,10,0
+msg_first_bad   db 'FAIL: first CBIOS DMA sector has no E9 vector',13,10,0
+msg_ram_bios    db 'RAM 2500: ',0
+msg_ram_2000    db 'RAM 2000: ',0
 msg_sel         db 'STEP: SELDSK',13,10,0
 msg_vector      db 'SELDSK vector: ',0
 msg_target      db 13,10,'Target: ',0
