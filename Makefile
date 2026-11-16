@@ -5,7 +5,7 @@ BUILD := build
 CPM86_CORE ?= external/system/cpm86_core.bin
 EXTERNAL_COMMANDS := $(sort $(wildcard external/commands/*.CMD external/commands/*.cmd))
 
-.PHONY: all check-tools check-core bios rom diag cbios-diag boot boot-d88 boot-2hd selftest check test clean
+.PHONY: all check-tools check-core bios rom diag cbios-diag boot boot-d88 boot-2hd fdformat-inc selftest check test clean
 all: bios rom check
 
 check-tools:
@@ -42,6 +42,16 @@ $(BUILD)/ipl_2d.bin: src/ipl_2d.asm | $(BUILD)
 
 $(BUILD)/ipl_2hd.bin: src/ipl_2hd.asm | $(BUILD)
 	$(NASM) -f bin $< -o $@
+
+# CP/M-86 ASM86 includes: generated from the exact disk IPL binaries.
+# These files are consumed by command/FDFORMAT.A86 under CP/M-86.
+command/FDIPL2D.INC: $(BUILD)/ipl_2d.bin command/bin2a86.py
+	$(PYTHON) command/bin2a86.py $< $@ --label fdipl2d_template --expect-size 512
+
+command/FDIPL2HD.INC: $(BUILD)/ipl_2hd.bin command/bin2a86.py
+	$(PYTHON) command/bin2a86.py $< $@ --label fdipl2hd_template --expect-size 512
+
+fdformat-inc: command/FDIPL2D.INC command/FDIPL2HD.INC
 
 $(BUILD)/fm11_cpm86_2d.img: $(BUILD)/cbios.bin tests/build_boot_2d.py $(CPM86_CORE) $(EXTERNAL_COMMANDS) | $(BUILD)
 	$(PYTHON) tests/build_boot_2d.py --core $(CPM86_CORE) --cbios $(BUILD)/cbios.bin \
@@ -114,9 +124,10 @@ diag: $(BUILD)/fdc2d_diag.bin
 check: $(BUILD)/cbios.bin $(BUILD)/bootrom.bin
 	$(PYTHON) tests/check_layout.py $(BUILD)/cbios.bin $(BUILD)/bootrom.bin
 
-test: check diag cbios-diag $(BUILD)/iplrom.bin $(BUILD)/test_2hd.d88
+test: check diag cbios-diag $(BUILD)/iplrom.bin $(BUILD)/test_2hd.d88 fdformat-inc
 	$(PYTHON) tests/check_boot_2hd.py $(BUILD)/ipl_2hd.bin $(BUILD)/cbios_2hd.bin \
 		$(BUILD)/test_2hd.raw $(BUILD)/test_2hd.d88
+	$(PYTHON) tests/check_fdformat_inc.py $(BUILD)/ipl_2d.bin $(BUILD)/ipl_2hd.bin command/FDIPL2D.INC command/FDIPL2HD.INC
 	$(PYTHON) tests/check_cbios_segments.py
 	$(PYTHON) tests/check_diag.py $(BUILD)/fdc2d_diag.bin
 	$(PYTHON) tests/check_cbios_diag.py $(BUILD)/cbios_diag.bin $(BUILD)/cbios_diag_2d.img $(BUILD)/cbios.bin
