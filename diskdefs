@@ -23,3 +23,20 @@ diskdef fm11-cpm86-2d
   skew 0
   os 2.2
 end
+
+# FM-11 native 2HD CP/M-86 logical 256-byte-slot raw image.
+# The first physical side is 26x128 FM (IPL), padded to 256-byte slots
+# in .raw; all remaining physical sides are 26x256 MFM.
+# CP/M OFF=4 skips cylinder 0 and cylinder 1; filesystem begins at C2/H0.
+# DPB: SPT=52, BSH=5, BLM=31, EXM=3, DSM=242, DRM=63, CKS=16.
+# The corresponding bootable D88 preserves its true 128-byte boot sectors.
+diskdef fm11-cpm86-2hd
+  seclen 256
+  tracks 154
+  sectrk 26
+  blocksize 4096
+  maxdir 64
+  boottrk 4
+  skew 0
+  os 2.2
+end
