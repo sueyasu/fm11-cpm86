@@ -5,7 +5,7 @@ BUILD := build
 CPM86_CORE ?= external/system/cpm86_core.bin
 EXTERNAL_COMMANDS := $(sort $(wildcard external/commands/*.CMD external/commands/*.cmd))
 
-.PHONY: all check-tools check-core bios rom diag cbios-diag boot boot-d88 selftest check test clean
+.PHONY: all check-tools check-core bios rom diag cbios-diag boot boot-d88 boot-2hd selftest check test clean
 all: bios rom check
 
 check-tools:
@@ -17,6 +17,10 @@ $(BUILD):
 
 $(BUILD)/cbios.bin: src/cbios.asm | $(BUILD)
 	$(NASM) -f bin $< -o $@
+
+# The 2HD bootable image starts at logical E:, while the 2D image starts at A:.
+$(BUILD)/cbios_2hd.bin: src/cbios.asm | $(BUILD)
+	$(NASM) -f bin -DBOOT_DRIVE=4 $< -o $@
 
 # Link the self-test into the CCP/BDOS-sized core region. Keep the
 # actual CBIOS at exactly 0x1900 bytes, preserving the normal IPL layout.
@@ -36,6 +40,9 @@ $(BUILD)/iplrom.bin: src/iplrom.asm | $(BUILD)
 $(BUILD)/ipl_2d.bin: src/ipl_2d.asm | $(BUILD)
 	$(NASM) -f bin $< -o $@
 
+$(BUILD)/ipl_2hd.bin: src/ipl_2hd.asm | $(BUILD)
+	$(NASM) -f bin $< -o $@
+
 $(BUILD)/fm11_cpm86_2d.img: $(BUILD)/cbios.bin tests/build_boot_2d.py $(CPM86_CORE) $(EXTERNAL_COMMANDS) | $(BUILD)
 	$(PYTHON) tests/build_boot_2d.py --core $(CPM86_CORE) --cbios $(BUILD)/cbios.bin \
 		$(foreach f,$(EXTERNAL_COMMANDS),--file $(f)) $@
@@ -52,6 +59,26 @@ boot-d88: check-core $(BUILD)/fm11_cpm86_boot_2d.d88
 		$(BUILD)/ipl_2d.bin $(BUILD)/fm11_cpm86_boot_2d.d88 \
 		$(BUILD)/fm11_cpm86_boot_2d.raw
 
+
+# Native FM-11 2HD: mixed 128-byte FM boot track / 256-byte MFM tracks.
+# The 2HD resident is built separately with cold-start drive E:.
+$(BUILD)/fm11_cpm86_boot_2hd.d88: $(BUILD)/cbios_2hd.bin $(BUILD)/ipl_2hd.bin tests/build_boot_2hd.py tests/build_boot_2d.py $(CPM86_CORE) $(EXTERNAL_COMMANDS) | $(BUILD)
+	$(PYTHON) tests/build_boot_2hd.py --core $(CPM86_CORE) --cbios $(BUILD)/cbios_2hd.bin \
+		--ipl $(BUILD)/ipl_2hd.bin $(foreach f,$(EXTERNAL_COMMANDS),--file $(f)) \
+		--raw-output $(BUILD)/fm11_cpm86_boot_2hd.raw --output $@
+
+boot-2hd: check-core $(BUILD)/fm11_cpm86_boot_2hd.d88
+	$(PYTHON) tests/check_boot_2hd.py $(BUILD)/ipl_2hd.bin $(BUILD)/cbios_2hd.bin \
+		$(BUILD)/fm11_cpm86_boot_2hd.raw $(BUILD)/fm11_cpm86_boot_2hd.d88
+
+# Structural 2HD tests use a deliberately nonbootable synthetic CCP/BDOS.
+# No proprietary CP/M core is necessary to run "make test".
+$(BUILD)/test_2hd_core.bin: | $(BUILD)
+	$(PYTHON) -c "from pathlib import Path; Path('$@').write_bytes(bytes(0x2500))"
+
+$(BUILD)/test_2hd.d88: $(BUILD)/test_2hd_core.bin $(BUILD)/cbios_2hd.bin $(BUILD)/ipl_2hd.bin tests/build_boot_2hd.py | $(BUILD)
+	$(PYTHON) tests/build_boot_2hd.py --core $(BUILD)/test_2hd_core.bin --cbios $(BUILD)/cbios_2hd.bin \
+		--ipl $(BUILD)/ipl_2hd.bin --raw-output $(BUILD)/test_2hd.raw --output $@
 
 # Only the disposable copy may be written by the test (last disk record).
 # ASM86.CMD is fixed as the first entry for the READ-data assertion.
@@ -87,7 +114,9 @@ diag: $(BUILD)/fdc2d_diag.bin
 check: $(BUILD)/cbios.bin $(BUILD)/bootrom.bin
 	$(PYTHON) tests/check_layout.py $(BUILD)/cbios.bin $(BUILD)/bootrom.bin
 
-test: check diag cbios-diag $(BUILD)/iplrom.bin
+test: check diag cbios-diag $(BUILD)/iplrom.bin $(BUILD)/test_2hd.d88
+	$(PYTHON) tests/check_boot_2hd.py $(BUILD)/ipl_2hd.bin $(BUILD)/cbios_2hd.bin \
+		$(BUILD)/test_2hd.raw $(BUILD)/test_2hd.d88
 	$(PYTHON) tests/check_cbios_segments.py
 	$(PYTHON) tests/check_diag.py $(BUILD)/fdc2d_diag.bin
 	$(PYTHON) tests/check_cbios_diag.py $(BUILD)/cbios_diag.bin $(BUILD)/cbios_diag_2d.img $(BUILD)/cbios.bin
