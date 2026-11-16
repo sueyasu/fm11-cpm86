@@ -23,27 +23,27 @@ BDOS_INT     equ 0x00E0
 BDOS_OFFSET  equ 0x0B06
 
 ; CP/M-86 BIOS jump vector: same ordering as the PC-98 reference.
-    jmp near INIT
-    jmp near WBOOT
-    jmp near CONST
-    jmp near CONIN
-    jmp near CONOUT
-    jmp near LISTOUT
-    jmp near PUNCH
-    jmp near READER
-    jmp near HOME
-    jmp near SELDSK
-    jmp near SETTRK
-    jmp near SETSEC
-    jmp near SETDMA
-    jmp near READ
-    jmp near WRITE
-    jmp near LISTST
-    jmp near SECTRAN
-    jmp near SETDMAB
-    jmp near GETSEGT
-    jmp near GETIOBF
-    jmp near SETIOBF
+    jmp strict near INIT
+    jmp strict near WBOOT
+    jmp strict near CONST
+    jmp strict near CONIN
+    jmp strict near CONOUT
+    jmp strict near LISTOUT
+    jmp strict near PUNCH
+    jmp strict near READER
+    jmp strict near HOME
+    jmp strict near SELDSK
+    jmp strict near SETTRK
+    jmp strict near SETSEC
+    jmp strict near SETDMA
+    jmp strict near READ
+    jmp strict near WRITE
+    jmp strict near LISTST
+    jmp strict near SECTRAN
+    jmp strict near SETDMAB
+    jmp strict near GETSEGT
+    jmp strict near GETIOBF
+    jmp strict near SETIOBF
 
     times 15 db 0
     dw 0                  ; compatibility PFK table (not yet implemented)
