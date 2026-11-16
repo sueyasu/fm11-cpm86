@@ -4,6 +4,47 @@ This project is an initial port of CP/M-86 to the Fujitsu FM-11's 8088
 main CPU card (or NEC V20 replacement). A first-stage 2D IPL ROM and
 image builder are available. **The 2D boot to the A> prompt and empty DIR\nhave been verified in the emulator.**
 
+## Fixed drive mapping and native 2HD boot
+
+The CBIOS uses a fixed eight-drive map, independent of the boot device:
+
+| CP/M drive | Controller | Physical drive |
+|---|---|---|
+| A:..D: | Mini-FDC 2D, 8237 DMA channel 0 | units 0..3 |
+| E:..H: | Standard FDC 2HD, 8237 DMA channel 1 | units 0..3 |
+
+The 2D boot image starts on **A:**; the 2HD boot image starts on
+**E:**. All eight DPHs are available in either CBIOS build. Both
+controllers read/write 256-byte sectors, deblocked into 128-byte CP/M
+records with immediate read-modify-write on half-sector writes.
+
+```sh
+make boot-d88    # 2D bootable D88, boot drive A:
+make boot-2hd    # 2HD bootable D88, boot drive E:
+make test        # static / synthetic-disk tests; no CP/M core required
+```
+
+Both boot targets require `external/system/cpm86_core.bin` (0x2500
+bytes) and include optional `external/commands/*.CMD` and `*.cmd`.
+The new 2HD target produces:
+
+- `build/cbios_2hd.bin`: 0x1900-byte CBIOS with cold-start drive E:
+- `build/ipl_2hd.bin`: 512-byte disk IPL
+- `build/fm11_cpm86_boot_2hd.raw`: 77 x 2 x 26 x 256-byte slot image
+- `build/fm11_cpm86_boot_2hd.d88`: native FM-11 2HD boot image
+
+In the D88 file, C0/H0 has 26 **128-byte FM** records and the
+remaining side-tracks have 26 **256-byte MFM** records. The resident
+core+BIOS begins at C0/H1/S1, while the CP/M filesystem begins at
+C2/H0 (DPB OFF=4). 2HD uses 4-KiB allocation blocks and supports
+243 blocks total (DSM=242). This image is intended for the
+2HD FDD0, with `[DIPSW] 2HD_FDD = true` in the emulator configuration.
+
+The image-structure and CBIOS-build tests pass, but **end-to-end
+2HD CP/M-86 boot and file I/O still require emulator validation**.
+
+See [the 2HD disk layout](docs/boot-2hd.md) for details.
+
 ## References
 
 - [sueyasu/pc98_cpm86](https://github.com/sueyasu/pc98_cpm86):
@@ -260,7 +301,7 @@ experimental firmware, and the CBIOS supports write operations.
 1. Verify command-populated 2D media using DIR and external CMD execution.
 2. Fix any remaining WBOOT/memory-region and CCP/BDOS ABI issues.
 3. Validate CP/M file creation/read/write on disposable 2D media.
-4. Add standard D88 output and additional drive/2HD hardware support.
+4. Validate all eight FDD units and native 2HD boot on the emulator.
 5. Test warm boot, standard CP/M commands, and real FM-11 hardware.
 
 See `docs/architecture.md` for hardware boundaries and open questions.
