@@ -45,6 +45,15 @@ FDF_SKIP_001:
         jmp     exit_program
 
 parsed:
+        ; Identify the destructive target before requesting confirmation.
+        mov     dx,offset msg_target
+        call    puts
+        mov     al,Byte Ptr target_drive
+        add     al,'A'
+        call    putc
+        mov     al,':'
+        call    putc
+        call    crlf
         cmp     Byte Ptr mode,MODE_LOW
         je     FDF_SKIP_002
         jmp     mode_supported
@@ -843,6 +852,26 @@ remaining       dw      0
 msg_title       db      0dh,0ah,'FM-11 CP/M-86 FDFORMAT',0dh,0ah,'$'
 msg_usage       db      'Usage: FDFORMAT A:..H: [/S|/L]',0dh,0ah
                 db      '/S=install boot system; /L not supported yet',0dh,0ah,'$'
+msg_target      db      'Target drive: 
+                db      'Continue (Y/N)? $'
+msg_low_unsupported db  'Physical WRITE TRACK formatting is not implemented.',0dh,0ah,'$'
+msg_abort       db      0dh,0ah,'Aborted.',0dh,0ah,'$'
+msg_source_error db     'Cannot read matching A:/E: system resident; disk unchanged.',0dh,0ah,'$'
+msg_format      db      'Initializing existing physical sectors...',0dh,0ah,'$'
+msg_install     db      'Installing IPL and clean resident image...',0dh,0ah,'$'
+msg_io_error    db      'Disk I/O or verify failed at C/H/S=', '$'
+msg_done_data   db      'Data disk initialization complete.',0dh,0ah,'$'
+msg_done_system db      'Bootable system disk initialization complete.',0dh,0ah,'$'
+
+INCLUDE FDIPL2D.INC
+INCLUDE FDIPL2HD.INC
+
+sectorbuf       rs      256
+system_image    rs      03e00h
+local_stack     rs      1024
+local_stack_top db      0
+end
+
 msg_warning     db      'WARNING: erases target disk (existing sector layout only).',0dh,0ah
                 db      'Continue (Y/N)? $'
 msg_low_unsupported db  'Physical WRITE TRACK formatting is not implemented.',0dh,0ah,'$'
