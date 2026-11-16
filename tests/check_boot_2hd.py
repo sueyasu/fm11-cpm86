@@ -8,6 +8,21 @@ from build_boot_2hd import (CYLINDERS, HEADS, SECTORS, SECTOR_BYTES,
                            RESIDENT_BYTES, HEADER_BYTES, make_d88, build_raw)
 
 
+def check_directory(raw):
+    directory = raw[RESERVED_BYTES:RESERVED_BYTES + 64*32]
+    assert len(directory) == 64*32
+    for i in range(0, len(directory), 32):
+        entry = directory[i:i+32]
+        if entry[0] == 0xe5:
+            continue
+        assert 0 <= entry[0] <= 15, f"invalid CP/M user in directory entry {i//32}"
+        assert entry[1:9].strip(b" "), f"empty filename in directory entry {i//32}"
+        # DSM=242, with single-byte block numbers.
+        assert all(block <= 242 for block in entry[16:32]), (
+            f"allocation number out of range in entry {i//32}"
+        )
+
+
 def check(ipl_path, bios_path, raw_path, d88_path):
     ipl, bios, raw, d88 = [
         pathlib.Path(path).read_bytes()
@@ -22,7 +37,10 @@ def check(ipl_path, bios_path, raw_path, d88_path):
         assert raw[pos:pos+128] == ipl[sector*128:(sector+1)*128]
     # Resident is contiguous from C0/H1/S1; CP/M directory at C2/H0.
     assert raw[SIDE_BYTES+0x2500:SIDE_BYTES+RESIDENT_BYTES] == bios
-    assert raw[RESERVED_BYTES:RESERVED_BYTES+32] == b"\xe5"*32
+    # A boot image may contain imported .CMD files.  Empty directory
+    # slots are E5h; occupied entries have a valid CP/M user number.
+    # Do not require the first entry to be empty.
+    check_directory(raw)
 
     pos = HEADER_BYTES
     recovered = bytearray(RAW_BYTES)
@@ -51,6 +69,17 @@ def check(ipl_path, bios_path, raw_path, d88_path):
         path = pathlib.Path(temp)/"BIG.CMD"
         path.write_bytes(bytes(range(256))*260)  # > 64 KiB, 2 entries
         disk = build_raw(bytes(0x2500),bios,ipl,[path])
+        # Regression: populated images must pass the same directory
+        # validation used for bootable images with imported .CMD files.
+        check_directory(disk)
+        corrupted = bytearray(disk)
+        corrupted[RESERVED_BYTES] = 0x30
+        try:
+            check_directory(corrupted)
+            raise AssertionError("invalid CP/M directory user was accepted")
+        except AssertionError as exc:
+            if "invalid CP/M user" not in str(exc):
+                raise
         directory = disk[RESERVED_BYTES:RESERVED_BYTES+64]
         assert directory[:1] == b"\x00"
         assert directory[32:33] == b"\x00"
