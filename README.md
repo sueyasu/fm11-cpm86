@@ -45,6 +45,23 @@ The image-structure and CBIOS-build tests pass, but **end-to-end
 
 See [the 2HD disk layout](docs/boot-2hd.md) for details.
 
+## FM-11 CP/M-86 floppy initialization command (experimental)
+
+The `command/FDFORMAT.A86` source handles A:..D: (2D units 0..3)
+and E:..H: (2HD units 0..3) by programming the FM-11 FDC and the
+8237 DMA directly. Run `make fdformat-inc` to generate the two IPL
+include files, then assemble `FDFORMAT.A86` using ASM86 and GENCMD
+inside CP/M-86.
+
+**Current limitation:** The emulator does not implement physical
+WRITE TRACK formatting. The command reinitializes sectors that
+already exist and can install the same-family system IPL with
+`/S`. `/L` explicitly reports unsupported. A truly unformatted
+disk is not supported yet. Use disposable correctly formatted D88
+images for initial validation. See
+[command/README.md](command/README.md) for build instructions,
+disk layout, and safety restrictions.
+
 ## References
 
 - [sueyasu/pc98_cpm86](https://github.com/sueyasu/pc98_cpm86):
