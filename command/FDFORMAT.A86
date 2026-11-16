@@ -1,0 +1,722 @@
+; FDFORMAT.A86 -- FM-11 CP/M-86 floppy initializer.
+; Ported in design from pc98_cpm86/command/FDFORMAT.A86.
+; IMPORTANT: FM-11 emulator currently does NOT implement WRITE TRACK.
+; This command reinitializes media with existing valid physical sectors;
+; it cannot construct sectors on a truly unformatted disk.
+;
+; Usage: FDFORMAT A: ... H:       initialize an existing 2D/2HD disk
+;        FDFORMAT /S A: ... H:    install the matching 2D/2HD system IPL
+;        /L is refused: physical formatting is not yet supported.
+;
+; A..D = 2D unit 0..3 (FD18h, 8237 CH0, 40x2x16x256)
+; E..H = 2HD unit 0..3 (FD30h, 8237 CH1, 77x2x26x256,
+;          first physical side 26x128-byte FM sectors).
+; 2D /S IPL: first two 256-byte sectors, resident from C0/H0/S3.
+; 2HD /S IPL: first four 128-byte sectors, resident from C0/H1/S1.
+; The resident image is always 62x256 bytes (0x3E00).
+;
+; ASM86 FDFORMAT.A86
+; GENCMD FDFORMAT
+;
+BDOSINT        equ     0e0h
+BIOS_SEG       equ     0400h
+BDOS_CURDRV    equ     024b7h
+MODE_DATA      equ     0
+MODE_SYSTEM    equ     1
+MODE_LOW       equ     2
+RES_SECTORS    equ     62
+FMT_FILL       equ     0e5h
+
+cseg
+start:
+        ; CP/M-86 compact-model DS addresses DSEG, including the base page.
+        ; Replace the CCP's small stack with a private 1 KiB stack.
+        mov     ax,ds
+        mov     ss,ax
+        mov     sp,offset local_stack_top
+        mov     dx,offset msg_title
+        call    puts
+        call    parse_tail
+        jnc     parsed
+        mov     dx,offset msg_usage
+        call    puts
+        jmp     exit_program
+
+parsed:
+        cmp     Byte Ptr mode,MODE_LOW
+        jne     mode_supported
+        mov     dx,offset msg_low_unsupported
+        call    puts
+        jmp     exit_program
+mode_supported:
+        mov     dx,offset msg_warning
+        call    puts
+        mov     cl,1
+        int     BDOSINT
+        call    uppercase
+        cmp     al,'Y'
+        je      confirmed
+        mov     dx,offset msg_abort
+        call    puts
+        jmp     exit_program
+confirmed:
+        call    crlf
+        ; Save a clean source resident before modifying target media.
+        ; The source must be the system drive (A: or E:) for the
+        ; matching CBIOS build; do not copy the currently executing RAM.
+        cmp     Byte Ptr mode,MODE_SYSTEM
+        jne     target_ready
+        call    find_source
+        jc      source_failed
+        call    save_resident
+        jc      source_failed
+        jmp     target_ready
+source_failed:
+        mov     dx,offset msg_source_error
+        call    puts
+        jmp     exit_program
+
+target_ready:
+        mov     al,Byte Ptr target_drive
+        mov     Byte Ptr io_drive,al
+        call    set_geometry
+        mov     dx,offset msg_format
+        call    puts
+        call    initialize_media
+        jc      io_failed
+        cmp     Byte Ptr mode,MODE_SYSTEM
+        jne     done_data
+        mov     dx,offset msg_install
+        call    puts
+        call    install_system
+        jc      io_failed
+        call    verify_system
+        jc      io_failed
+        mov     dx,offset msg_done_system
+        call    puts
+        jmp     reset_exit
+done_data:
+        mov     dx,offset msg_done_data
+        call    puts
+        jmp     reset_exit
+io_failed:
+        mov     dx,offset msg_io_error
+        call    puts
+        mov     al,Byte Ptr io_cyl
+        call    hex8
+        mov     al,'/'
+        call    putc
+        mov     al,Byte Ptr io_head
+        call    hex8
+        mov     al,'/'
+        call    putc
+        mov     al,Byte Ptr io_sector
+        call    hex8
+        call    crlf
+
+reset_exit:
+        ; Force BDOS to discard directory/allocation state changed
+        ; outside the ordinary BIOS/BDOS record-I/O interface.
+        mov     cl,13
+        int     BDOSINT
+exit_program:
+        mov     cl,0
+        int     BDOSINT
+        hlt
+
+; Parse command line at DS:0080h. One A:..H: drive and /S or /L.
+; No media density option: FM-11 uses separate physical controllers.
+parse_tail:
+        mov     Byte Ptr target_drive,0ffh
+        mov     Byte Ptr mode,MODE_DATA
+        xor     cx,cx
+        mov     cl,Byte Ptr 080h
+        mov     si,081h
+pt_loop:
+        or      cx,cx
+        jz      pt_done
+        mov     al,[si]
+        cmp     al,' '
+        je      pt_next
+        cmp     al,9
+        je      pt_next
+        cmp     al,':'
+        je      pt_next
+        cmp     al,'/'
+        je      pt_option
+        cmp     al,'-'
+        je      pt_option
+        call    uppercase
+        cmp     al,'A'
+        jb      pt_bad
+        cmp     al,'H'
+        ja      pt_bad
+        cmp     Byte Ptr target_drive,0ffh
+        jne     pt_bad
+        sub     al,'A'
+        mov     Byte Ptr target_drive,al
+        jmp     pt_next
+pt_option:
+        inc     si
+        dec     cx
+        jz      pt_bad
+        mov     al,[si]
+        call    uppercase
+        cmp     al,'S'
+        je      pt_system
+        cmp     al,'L'
+        je      pt_low
+        jmp     pt_bad
+pt_system:
+        cmp     Byte Ptr mode,MODE_DATA
+        jne     pt_bad
+        mov     Byte Ptr mode,MODE_SYSTEM
+        jmp     pt_next
+pt_low:
+        cmp     Byte Ptr mode,MODE_DATA
+        jne     pt_bad
+        mov     Byte Ptr mode,MODE_LOW
+pt_next:
+        inc     si
+        dec     cx
+        jmp     pt_loop
+pt_done:
+        cmp     Byte Ptr target_drive,0ffh
+        je      pt_bad
+        clc
+        ret
+pt_bad:
+        stc
+        ret
+
+uppercase:
+        cmp     al,'a'
+        jb      up_done
+        cmp     al,'z'
+        ja      up_done
+        and     al,05fh
+up_done:
+        ret
+
+; Read the BDOS source drive, not CCP's transient current drive.
+; CBIOS is compiled with boot drive A: for 2D or E: for 2HD.
+; Refuse cross-family installation: the resident INIT boot drive
+; must match the physical FDC family used by its IPL.
+find_source:
+        push    es
+        mov     ax,BIOS_SEG
+        mov     es,ax
+        mov     al,Byte Ptr es:[BDOS_CURDRV]
+        pop     es
+        cmp     al,0
+        je      fs_source_ok
+        cmp     al,4
+        jne     fs_source_bad
+fs_source_ok:
+        mov     Byte Ptr source_drive,al
+        mov     bl,al
+        mov     al,Byte Ptr target_drive
+        cmp     al,4
+        jb      fs_target_2d
+        cmp     bl,4
+        jne     fs_source_bad
+        clc
+        ret
+fs_target_2d:
+        cmp     bl,0
+        jne     fs_source_bad
+        clc
+        ret
+fs_source_bad:
+        stc
+        ret
+
+; Setup transfer geometry, including selected physical drive.
+; Input io_drive = CP/M drive 0..7.
+set_geometry:
+        mov     al,Byte Ptr io_drive
+        cmp     al,4
+        jb      sg_2d
+        sub     al,4
+        mov     Byte Ptr io_unit,al
+        mov     Byte Ptr io_channel,1
+        mov     Byte Ptr sectors_per_side,26
+        mov     Byte Ptr cylinders,77
+        ret
+sg_2d:
+        mov     Byte Ptr io_unit,al
+        mov     Byte Ptr io_channel,0
+        mov     Byte Ptr sectors_per_side,16
+        mov     Byte Ptr cylinders,40
+        ret
+
+; The source disk stores its 0x3E00-byte image in 62 sectors.
+; Copy into a separate transient buffer, never snapshot loaded RAM.
+save_resident:
+        mov     al,Byte Ptr source_drive
+        mov     Byte Ptr io_drive,al
+        call    set_geometry
+        call    position_resident
+        mov     Word Ptr image_offset,0
+        mov     Word Ptr remaining,RES_SECTORS
+sr_loop:
+        mov     Word Ptr io_size,256
+        mov     Byte Ptr io_write,0
+        call    disk_transfer
+        jc      sr_error
+        push    cx
+        push    si
+        push    di
+        push    es
+        push    ds
+        pop     es
+        mov     si,offset sectorbuf
+        mov     di,offset system_image
+        add     di,Word Ptr image_offset
+        mov     cx,128
+        cld
+        rep     movsw
+        pop     es
+        pop     di
+        pop     si
+        pop     cx
+        add     Word Ptr image_offset,256
+        call    advance_sector
+        dec     Word Ptr remaining
+        jnz     sr_loop
+        ; Resident CBIOS begins immediately after the 0x2500-byte
+        ; external CCP/BDOS core.
+        cmp     Byte Ptr system_image+02500h,0e9h
+        jne     sr_error
+        clc
+        ret
+sr_error:
+        stc
+        ret
+
+position_resident:
+        mov     Byte Ptr io_cyl,0
+        mov     Byte Ptr io_head,0
+        mov     Byte Ptr io_sector,3
+        cmp     Byte Ptr io_channel,0
+        je      pr_done
+        mov     Byte Ptr io_head,1
+        mov     Byte Ptr io_sector,1
+pr_done:
+        ret
+
+advance_sector:
+        inc     Byte Ptr io_sector
+        mov     al,Byte Ptr io_sector
+        cmp     al,Byte Ptr sectors_per_side
+        jbe     adv_done
+        mov     Byte Ptr io_sector,1
+        xor     Byte Ptr io_head,1
+        jnz     adv_done
+        inc     Byte Ptr io_cyl
+adv_done:
+        ret
+
+; Erase all *existing* physical sectors with E5h. The FDC does not
+; implement WRITE TRACK; this routine never claims to create sectors.
+initialize_media:
+        push    es
+        push    ds
+        pop     es
+        mov     di,offset sectorbuf
+        mov     cx,128
+        mov     ax,0e5e5h
+        cld
+        rep     stosw
+        pop     es
+
+        mov     Byte Ptr io_cyl,0
+        mov     Byte Ptr io_head,0
+        mov     Byte Ptr io_sector,1
+im_loop:
+        mov     Word Ptr io_size,256
+        cmp     Byte Ptr io_channel,0
+        je      im_regular
+        cmp     Byte Ptr io_cyl,0
+        jne     im_regular
+        cmp     Byte Ptr io_head,0
+        jne     im_regular
+        mov     Word Ptr io_size,128
+im_regular:
+        mov     Byte Ptr io_write,1
+        call    disk_transfer
+        jc      im_fail
+        call    advance_sector
+        mov     al,Byte Ptr io_cyl
+        cmp     al,Byte Ptr cylinders
+        jb      im_loop
+        clc
+        ret
+im_fail:
+        stc
+        ret
+
+; Write the appropriate 512-byte first stage and 62 resident sectors.
+install_system:
+        mov     al,Byte Ptr target_drive
+        mov     Byte Ptr io_drive,al
+        call    set_geometry
+        mov     Byte Ptr io_cyl,0
+        mov     Byte Ptr io_head,0
+        mov     Byte Ptr io_sector,1
+        mov     Word Ptr image_offset,0
+        mov     Word Ptr remaining,2
+        cmp     Byte Ptr io_channel,0
+        je      is_ipl_loop
+        mov     Word Ptr remaining,4
+is_ipl_loop:
+        push    cx
+        push    si
+        push    di
+        push    es
+        push    ds
+        pop     es
+        mov     di,offset sectorbuf
+        mov     si,offset fdipl2d_template
+        mov     cx,128
+        cmp     Byte Ptr io_channel,0
+        je      is_copy_ipl
+        mov     si,offset fdipl2hd_template
+        mov     cx,64
+is_copy_ipl:
+        add     si,Word Ptr image_offset
+        cld
+        rep     movsw
+        pop     es
+        pop     di
+        pop     si
+        pop     cx
+        mov     Word Ptr io_size,256
+        cmp     Byte Ptr io_channel,0
+        je      is_write_ipl
+        mov     Word Ptr io_size,128
+is_write_ipl:
+        mov     Byte Ptr io_write,1
+        call    disk_transfer
+        jc      is_fail
+        mov     ax,Word Ptr io_size
+        add     Word Ptr image_offset,ax
+        call    advance_sector
+        dec     Word Ptr remaining
+        jnz     is_ipl_loop
+
+        call    position_resident
+        mov     Word Ptr image_offset,0
+        mov     Word Ptr remaining,RES_SECTORS
+is_resident_loop:
+        call    prepare_resident_sector
+        mov     Word Ptr io_size,256
+        mov     Byte Ptr io_write,1
+        call    disk_transfer
+        jc      is_fail
+        add     Word Ptr image_offset,256
+        call    advance_sector
+        dec     Word Ptr remaining
+        jnz     is_resident_loop
+        clc
+        ret
+is_fail:
+        stc
+        ret
+
+prepare_resident_sector:
+        push    cx
+        push    si
+        push    di
+        push    es
+        push    ds
+        pop     es
+        mov     si,offset system_image
+        add     si,Word Ptr image_offset
+        mov     di,offset sectorbuf
+        mov     cx,128
+        cld
+        rep     movsw
+        pop     es
+        pop     di
+        pop     si
+        pop     cx
+        ret
+
+verify_system:
+        mov     al,Byte Ptr target_drive
+        mov     Byte Ptr io_drive,al
+        call    set_geometry
+        call    position_resident
+        mov     Word Ptr image_offset,0
+        mov     Word Ptr remaining,RES_SECTORS
+vs_loop:
+        mov     Word Ptr io_size,256
+        mov     Byte Ptr io_write,0
+        call    disk_transfer
+        jc      vs_fail
+        push    cx
+        push    si
+        push    di
+        push    es
+        push    ds
+        pop     es
+        mov     si,offset system_image
+        add     si,Word Ptr image_offset
+        mov     di,offset sectorbuf
+        mov     cx,256
+        cld
+        repe    cmpsb
+        pop     es
+        pop     di
+        pop     si
+        pop     cx
+        jne     vs_fail
+        add     Word Ptr image_offset,256
+        call    advance_sector
+        dec     Word Ptr remaining
+        jnz     vs_loop
+        clc
+        ret
+vs_fail:
+        stc
+        ret
+
+; Direct 8237 + FDC one-physical-sector transfer. The DMA buffer is
+; private and never crosses a 64-KiB DMA page. Both CPU-family
+; FDCs use their real hardware I/O ports.
+;
+; io_write = 0 read, 1 write; io_size = 128 or 256
+; Result CF clear only on FDC status 0 AND terminal count.
+disk_transfer:
+        push    ax
+        push    bx
+        push    cx
+        push    dx
+        push    si
+        push    di
+        push    bp
+        mov     ax,ds
+        mov     si,16
+        mul     si
+        add     ax,offset sectorbuf
+        adc     dx,0
+        cmp     ax,0ff00h
+        ja      dt_bad
+        cmp     dx,15
+        ja      dt_bad
+        mov     si,ax
+        mov     di,dx
+
+        mov     dx,01ah
+        mov     al,4
+        add     al,Byte Ptr io_channel
+        out     dx,al
+        mov     dx,01ch
+        xor     al,al
+        out     dx,al
+
+        mov     dx,010h
+        cmp     Byte Ptr io_channel,0
+        je      dt_addr
+        mov     dl,012h
+dt_addr:
+        mov     ax,si
+        out     dx,al
+        mov     al,ah
+        out     dx,al
+
+        mov     dx,011h
+        cmp     Byte Ptr io_channel,0
+        je      dt_count
+        mov     dl,013h
+dt_count:
+        mov     ax,Word Ptr io_size
+        dec     ax
+        out     dx,al
+        mov     al,ah
+        out     dx,al
+
+        mov     dx,020h
+        cmp     Byte Ptr io_channel,0
+        je      dt_bank
+        mov     dl,021h
+dt_bank:
+        mov     ax,di
+        out     dx,al
+
+        mov     dx,01bh
+        mov     al,044h
+        cmp     Byte Ptr io_write,0
+        je      dt_mode
+        mov     al,048h
+dt_mode:
+        add     al,Byte Ptr io_channel
+        out     dx,al
+        mov     dx,018h
+        in      al,dx
+
+        mov     dx,0fd19h
+        cmp     Byte Ptr io_channel,0
+        je      dt_track
+        mov     dl,031h
+dt_track:
+        mov     al,Byte Ptr io_cyl
+        out     dx,al
+        inc     dx
+        mov     al,Byte Ptr io_sector
+        out     dx,al
+
+        mov     dx,0fd1ch
+        cmp     Byte Ptr io_channel,0
+        je      dt_side
+        mov     dl,034h
+dt_side:
+        mov     al,Byte Ptr io_head
+        out     dx,al
+        inc     dx
+        mov     al,Byte Ptr io_unit
+        out     dx,al
+
+        mov     dx,01ah
+        mov     al,Byte Ptr io_channel
+        out     dx,al
+
+        mov     dx,0fd18h
+        cmp     Byte Ptr io_channel,0
+        je      dt_command
+        mov     dl,030h
+dt_command:
+        mov     al,080h
+        cmp     Byte Ptr io_write,0
+        je      dt_start
+        mov     al,0a0h
+dt_start:
+        out     dx,al
+        mov     cx,0ffffh
+dt_poll:
+        in      al,dx
+        test    al,010h
+        jnz     dt_fail
+        test    al,002h
+        jz      dt_check
+        loop    dt_poll
+        jmp     dt_fail
+dt_check:
+        or      al,al
+        jnz     dt_fail
+        mov     dx,018h
+        in      al,dx
+        cmp     Byte Ptr io_channel,0
+        je      dt_tc0
+        test    al,2
+        jz      dt_fail
+        jmp     dt_ok
+dt_tc0:
+        test    al,1
+        jz      dt_fail
+dt_ok:
+        clc
+        jmp     dt_finish
+dt_fail:
+dt_bad:
+        stc
+dt_finish:
+        pushf
+        mov     dx,01ah
+        mov     al,4
+        add     al,Byte Ptr io_channel
+        out     dx,al
+        popf
+        pop     bp
+        pop     di
+        pop     si
+        pop     dx
+        pop     cx
+        pop     bx
+        pop     ax
+        ret
+
+puts:
+        mov     cl,9
+        int     BDOSINT
+        ret
+putc:
+        push    bx
+        push    cx
+        push    dx
+        mov     dl,al
+        mov     cl,2
+        int     BDOSINT
+        pop     dx
+        pop     cx
+        pop     bx
+        ret
+crlf:
+        mov     al,0dh
+        call    putc
+        mov     al,0ah
+        call    putc
+        ret
+hex8:
+        push    ax
+        push    cx
+        mov     ah,al
+        mov     cl,4
+        shr     al,cl
+        call    hex_nibble
+        mov     al,ah
+        and     al,0fh
+        call    hex_nibble
+        pop     cx
+        pop     ax
+        ret
+hex_nibble:
+        add     al,'0'
+        cmp     al,'9'
+        jbe     hn_out
+        add     al,7
+hn_out:
+        jmp     putc
+
+dseg
+org     100h
+
+target_drive    db      0ffh
+source_drive    db      0ffh
+mode            db      MODE_DATA
+io_drive        db      0
+io_unit         db      0
+io_channel      db      0
+cylinders       db      40
+sectors_per_side db     16
+io_cyl          db      0
+io_head         db      0
+io_sector       db      1
+io_write        db      0
+io_size         dw      256
+image_offset    dw      0
+remaining       dw      0
+
+msg_title       db      0dh,0ah,'FM-11 CP/M-86 FDFORMAT',0dh,0ah,'$'
+msg_usage       db      'Usage: FDFORMAT A:..H: [/S|/L]',0dh,0ah
+                db      '/S=install boot system; /L not supported yet',0dh,0ah,'$'
+msg_warning     db      'WARNING: erases target disk (existing sector layout only).',0dh,0ah
+                db      'Continue (Y/N)? $'
+msg_low_unsupported db  'Physical WRITE TRACK formatting is not implemented.',0dh,0ah,'$'
+msg_abort       db      0dh,0ah,'Aborted.',0dh,0ah,'$'
+msg_source_error db     'Cannot read matching A:/E: system resident; disk unchanged.',0dh,0ah,'$'
+msg_format      db      'Initializing existing physical sectors...',0dh,0ah,'$'
+msg_install     db      'Installing IPL and clean resident image...',0dh,0ah,'$'
+msg_io_error    db      'Disk I/O or verify failed at C/H/S=', '$'
+msg_done_data   db      'Data disk initialization complete.',0dh,0ah,'$'
+msg_done_system db      'Bootable system disk initialization complete.',0dh,0ah,'$'
+
+INCLUDE FDIPL2D.INC
+INCLUDE FDIPL2HD.INC
+
+sectorbuf       rs      256
+system_image    rs      03e00h
+local_stack     rs      1024
+local_stack_top db      0
+end
