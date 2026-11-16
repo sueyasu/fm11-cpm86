@@ -1,6 +1,6 @@
 ; FM-11 CP/M-86 v1.1 experimental CBIOS.
 ; Resident core ABI and vector layout originate from sueyasu/pc98_cpm86.
-; 8251 serial console and Mini-FDC 2D 128-byte READ/WRITE are implemented.
+; A:..D: use Mini-FDC (2D), E:..H: use standard FDC (2HD), 128-byte records.
 ; IPL/cold-boot and file-level CP/M-86 compatibility are not yet verified.
 cpu 8086
 bits 16
@@ -14,6 +14,9 @@ SER_STATUS   equ 0xFD07
 SER_RX_READY equ 0x02
 SER_TX_READY equ 0x01
 BIOS_SIZE    equ 0x1900
+%ifndef BOOT_DRIVE
+%define BOOT_DRIVE 0             ; 2D FDD0=A:, 2HD FDD0=E:
+%endif
 BIOS_WORK    equ 0x3E00
 BIOS_STACK   equ BIOS_WORK+0x0200 ; 0400h:4000h ends below TPA 0800h
 BDOS_INT     equ 0x00E0
@@ -80,8 +83,8 @@ INIT:
     ; Match the CP/M-86 v1.1 cold-start ABI from pc98_cpm86:
     ; BDOS CURDRV resides at offset 24B7h in the common system segment.
     ; The CCP cold entry also expects the boot drive in CL.
-    ; We currently boot only from the Mini-FDC unit 0 (A:).
-    xor cx,cx
+    ; The medium-specific IPL/CBIOS build determines the cold boot drive.
+    mov cx,BOOT_DRIVE
     mov byte [cur_disk],cl
     mov byte [0x24b7],cl
     sti
@@ -163,12 +166,10 @@ HOME:
     ret
 
 SELDSK:
-    ; CL = logical drive (A:..D: are 2D units 0..3).
-    ; DL bit 0 = 0 for first login, 1 for an already logged-in disk.
-    ; The current emulator supports physical Mini-FDC unit 0 for I/O.
-    ; DPH entries for B:..D: remain provisional.
+    ; CL=0..7: A:..D: 2D units 0..3; E:..H: 2HD units 0..3.
+    ; DL bit 0 = 0 on first login, 1 if previously logged in.
     xor bx,bx
-    cmp cl,4
+    cmp cl,8
     jae .absent
     xor ch,ch
     mov bx,cx
@@ -194,9 +195,8 @@ SETDMAB:
     mov [dma_seg],cx
     ret
 
-; CP/M-86 128-byte record I/O for Mini FDC (2D).
-; A CP/M track represents one physical side (32 records).
-; The current emulator supports physical Mini FDC unit 0 only.
+; CP/M-86 128-byte record I/O: 2D (32 records/side-track) or
+; 2HD (52 records/side-track).  All eight drives are independent.
 ; Each write reads the whole physical sector before changing one half.
 READ:
 %ifdef CBIOS_SELFTEST
@@ -229,7 +229,15 @@ rw_2d:
 %endif
 
     mov bx,[cur_track]
-    cmp bx,80               ; 40 cylinders * 2 side-tracks
+    cmp byte [cur_disk],8
+    jae .invalid
+    cmp byte [cur_disk],4
+    jb .check_2d_track
+    cmp bx,154              ; 2HD: 77 cylinders * 2 side-tracks
+    jmp .track_checked
+.check_2d_track:
+    cmp bx,80               ; 2D: 40 cylinders * 2 side-tracks
+.track_checked:
 %ifdef CBIOS_SELFTEST
     ; Diagnostic only. PUSHF/POP memory preserve CMP FLAGS for JAE;
     ; report whether the actual instruction sees the expected BX/CF/ZF.
@@ -240,14 +248,18 @@ rw_2d:
 %endif
     jae .invalid
     mov bx,[cur_sector]
-    cmp bx,32               ; 128-byte logical records, numbered 0..31
+    cmp byte [cur_disk],4
+    jb .check_2d_sector
+    cmp bx,52               ; 2HD: 26 * 2 logical records
+    jmp .sector_checked
+.check_2d_sector:
+    cmp bx,32               ; 2D: 16 * 2 logical records
+.sector_checked:
     jae .invalid
     mov bx,[dma_off]
     cmp bx,0xff80           ; prevent a 128-byte segment wrap
     ja .invalid
-    cmp byte [cur_disk],0   ; Mini FDC emulator currently models unit 0
-    jne .invalid
-    jmp short .valid
+    jmp .valid
 .invalid:
 %ifdef CBIOS_SELFTEST
     mov byte [st_rw_path],2      ; input rejected before disk access
@@ -359,16 +371,16 @@ cur_sector dw 0
 dma_off dw 0x80
 dma_seg dw 0
 ; ----------------------------------------------------------------------
-; 2D physical-sector transport (256 bytes), preliminary direct 8088 path.
+; Common 2D/2HD 256-byte physical-sector transport, direct 8088 path.
 ;
 ; Entry for both functions:
-;   AL = physical drive (currently 0 only), CH = cylinder (0..39),
-;   DH = head (0..1), CL = physical sector number (1..16).
+;   AL = CP/M drive 0..7; CH = cylinder; DH = head;
+;   CL = physical sector number. 2D uses CH0/FD18, 2HD CH1/FD30.
 ;   Fixed DMA buffer = CS:fdc2d_buffer; preserves all general registers.
 ; Return CF=0 for one complete 256-byte transfer, CF=1 on error.
 ;
 ; These are physical 256-byte transfers used by the CP/M-86
-; READ/WRITE entries above. DMA CH0 and Mini FDC are temporarily exclusive.
+; READ/WRITE entries above. Only the selected DMA channel is programmed.
 ; ----------------------------------------------------------------------
 fdc2d_read:
     mov ah,0x44              ; CH0, single, I/O -> memory
@@ -387,18 +399,30 @@ fdc2d_transfer:
     push bp
     mov bp,dx                ; preserve head in DH before DX becomes I/O port
 
-    mov bx,ax                ; BL=drive, BH=8237 mode
-    cmp bl,0                 ; emulator Mini FDC currently selects unit 0
-    jne .invalid
-    cmp ch,40
+    mov bx,ax                ; BL=logical drive, BH=8237 CH0 mode
+    mov byte [fdc_channel],0
+    cmp bl,8
     jae .invalid
     cmp dh,1
     ja .invalid
     cmp cl,1
     jb .invalid
+    cmp bl,4
+    jb .validate_2d
+    sub bl,4                 ; E:..H: -> standard FDC units 0..3
+    mov byte [fdc_channel],1
+    inc bh                   ; CH0 mode 44/48 -> CH1 45/49
+    cmp ch,77
+    jae .invalid
+    cmp cl,26
+    ja .invalid
+    jmp .validated
+.validate_2d:
+    cmp ch,40
+    jae .invalid
     cmp cl,16
     ja .invalid
-    jmp short .validated
+    jmp .validated
 .invalid:
     jmp .bad               ; 8086 conditional branches have 8-bit reach
 .validated:
@@ -415,41 +439,62 @@ fdc2d_transfer:
     mov si,ax                ; 16-bit DMA address
     mov di,dx                ; DMA bank (bits 16..19)
 
-    mov dx,0x1a             ; mask DMA channel 0 while programming
+    mov dx,0x1a             ; mask selected 8237 channel
     mov al,4
+    add al,[fdc_channel]
     out dx,al
     mov dx,0x1c             ; reset 8237 address/count flip-flop
     xor al,al
     out dx,al
 
-    mov dx,0x10             ; CH0 address, low byte then high byte
+    mov dx,0x10             ; CH0 address=10h, CH1 address=12h
+    cmp byte [fdc_channel],0
+    je .address_port
+    mov dl,0x12
+.address_port:
     mov ax,si
     out dx,al
     mov al,ah
     out dx,al
 
-    mov dx,0x11             ; CH0 terminal count = 256 - 1
+    mov dx,0x11             ; CH0 count=11h, CH1 count=13h
+    cmp byte [fdc_channel],0
+    je .count_port
+    mov dl,0x13
+.count_port:
     mov al,0xff
     out dx,al
     xor al,al
     out dx,al
 
-    mov dx,0x20             ; CH0 DMA bank
+    mov dx,0x20             ; CH0 bank=20h, CH1 bank=21h
+    cmp byte [fdc_channel],0
+    je .bank_port
+    mov dl,0x21
+.bank_port:
     mov ax,di
     out dx,al
-    mov dx,0x1b             ; transfer direction, CH0 single mode
+    mov dx,0x1b             ; transfer direction, selected single mode
     mov al,bh
     out dx,al
     mov dx,0x18             ; discard any previous terminal-count latch
     in al,dx
 
-    mov dx,0xfd19           ; FDC track
+    mov dx,0xfd19           ; 2D FD19/1A/1C/1D; 2HD FD31/32/34/35
+    cmp byte [fdc_channel],0
+    je .track_port
+    mov dl,0x31
+.track_port:
     mov al,ch
     out dx,al
     inc dx                  ; FD1A: sector
     mov al,cl
     out dx,al
-    mov dx,0xfd1c           ; FD1C: side
+    mov dx,0xfd1c           ; FD1C or FD34: side
+    cmp byte [fdc_channel],0
+    je .side_port
+    mov dl,0x34
+.side_port:
     mov ax,bp                ; original caller DH, not port high byte FDh
     mov al,ah
     out dx,al
@@ -457,12 +502,18 @@ fdc2d_transfer:
     mov al,bl
     out dx,al
 
-    mov dx,0x1a             ; unmask CH0
-    xor al,al
+    mov dx,0x1a             ; unmask selected channel
+    mov al,[fdc_channel]
     out dx,al
     mov dx,0xfd18
+    cmp byte [fdc_channel],0
+    je .command_port
+    mov dl,0x30
+.command_port:
     mov al,0x80
     cmp bh,0x44
+    je .start
+    cmp bh,0x45
     je .start
     mov al,0xa0
 .start:
@@ -484,17 +535,25 @@ fdc2d_transfer:
     or al,al                ; success requires status = 0
     jnz .fail
     mov dx,0x18
-    in al,dx                ; check 8237 CH0 terminal-count flag
+    in al,dx                ; 8237 terminal count (CH0=bit0, CH1=bit1)
+    cmp byte [fdc_channel],0
+    je .check_tc0
+    test al,2
+    jz .fail
+    jmp .tc_ok
+.check_tc0:
     test al,1
     jz .fail
+.tc_ok:
     clc
     jmp .finish
 .fail:
     stc
 .finish:
     pushf
-    mov dx,0x1a             ; leave DMA CH0 masked
+    mov dx,0x1a             ; leave selected DMA channel masked
     mov al,4
+    add al,[fdc_channel]
     out dx,al
     popf
     jmp .restore
@@ -511,13 +570,14 @@ fdc2d_transfer:
     ret
 
 ; DMA bounce buffer, never exposed as a logical CP/M record.
+fdc_channel db 0
 fdc2d_buffer: times 256 db 0
 
-; CP/M-86 disk parameter headers.  Four independent 2D drives are
-; advertised at A:..D:.  Each DPH is 16 bytes, with private CSV/ALV.
+; Eight physical drives: A:..D: 2D/CH0, E:..H: 2HD/CH1.
+; Every DPH has private CSV/ALV, using a shared 128-byte directory buffer.
 ; See docs/architecture.md for the provisional 2D filesystem layout.
 dph_table:
-    dw dph0,dph1,dph2,dph3
+    dw dph0,dph1,dph2,dph3,dph4,dph5,dph6,dph7
 
 dph0:
     dw 0,0,0,0
@@ -531,6 +591,18 @@ dph2:
 dph3:
     dw 0,0,0,0
     dw dirbuf,dpb_2d,csv3,alv3
+dph4:
+    dw 0,0,0,0
+    dw dirbuf,dpb_2hd,csv4,alv4
+dph5:
+    dw 0,0,0,0
+    dw dirbuf,dpb_2hd,csv5,alv5
+dph6:
+    dw 0,0,0,0
+    dw dirbuf,dpb_2hd,csv6,alv6
+dph7:
+    dw 0,0,0,0
+    dw dirbuf,dpb_2hd,csv7,alv7
 
 ; 40 cylinders * 2 sides * 16 sectors * 256 bytes = 320 KiB.
 ; One CP/M logical track is one side: 32 * 128-byte records.
@@ -545,15 +617,36 @@ dpb_2d:
     dw 16                 ; CKS: (DRM+1)/4
     dw 4                  ; OFF: four reserved side-tracks (2 cylinders)
 
+; 2HD: 77 cylinders x 2 heads x 26 x 256-byte sectors.
+; Four side-tracks (two cylinders) reserved for IPL and resident image.
+; 150 remaining side-tracks = 998400 bytes -> 243 full 4 KiB blocks.
+; DSM=242 keeps 8-bit allocation entries (16 pointers per directory entry).
+dpb_2hd:
+    dw 52                 ; SPT: 26 physical sectors x 2 records
+    db 5,31,3             ; BSH=5 4 KiB, BLM=31, EXM=3 (DSM < 256)
+    dw 242                ; DSM: block numbers 0..242
+    dw 63                 ; DRM: 64 directory entries
+    db 0x80,0             ; AL0/AL1: block 0 reserved for directory
+    dw 16                 ; CKS
+    dw 4                  ; OFF: four reserved side-tracks
+
 dirbuf: times 128 db 0
 csv0: times 16 db 0
 csv1: times 16 db 0
 csv2: times 16 db 0
 csv3: times 16 db 0
+csv4: times 16 db 0
+csv5: times 16 db 0
+csv6: times 16 db 0
+csv7: times 16 db 0
 alv0: times 20 db 0
 alv1: times 20 db 0
 alv2: times 20 db 0
 alv3: times 20 db 0
+alv4: times 31 db 0
+alv5: times 31 db 0
+alv6: times 31 db 0
+alv7: times 31 db 0
 
 ; Memory region table is provisional and must be validated before boot.
 mrt:
