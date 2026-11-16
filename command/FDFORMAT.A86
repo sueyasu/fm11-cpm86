@@ -37,14 +37,18 @@ start:
         mov     dx,offset msg_title
         call    puts
         call    parse_tail
-        jnc     parsed
+        jc     FDF_SKIP_001
+        jmp     parsed
+FDF_SKIP_001:
         mov     dx,offset msg_usage
         call    puts
         jmp     exit_program
 
 parsed:
         cmp     Byte Ptr mode,MODE_LOW
-        jne     mode_supported
+        je     FDF_SKIP_002
+        jmp     mode_supported
+FDF_SKIP_002:
         mov     dx,offset msg_low_unsupported
         call    puts
         jmp     exit_program
@@ -55,7 +59,9 @@ mode_supported:
         int     BDOSINT
         call    uppercase
         cmp     al,'Y'
-        je      confirmed
+        jne     FDF_SKIP_003
+        jmp     confirmed
+FDF_SKIP_003:
         mov     dx,offset msg_abort
         call    puts
         jmp     exit_program
@@ -65,11 +71,17 @@ confirmed:
         ; The source must be the system drive (A: or E:) for the
         ; matching CBIOS build; do not copy the currently executing RAM.
         cmp     Byte Ptr mode,MODE_SYSTEM
-        jne     target_ready
+        je     FDF_SKIP_004
+        jmp     target_ready
+FDF_SKIP_004:
         call    find_source
-        jc      source_failed
+        jnc     FDF_SKIP_005
+        jmp     source_failed
+FDF_SKIP_005:
         call    save_resident
-        jc      source_failed
+        jnc     FDF_SKIP_006
+        jmp     source_failed
+FDF_SKIP_006:
         jmp     target_ready
 source_failed:
         mov     dx,offset msg_source_error
@@ -83,15 +95,23 @@ target_ready:
         mov     dx,offset msg_format
         call    puts
         call    initialize_media
-        jc      io_failed
+        jnc     FDF_SKIP_007
+        jmp     io_failed
+FDF_SKIP_007:
         cmp     Byte Ptr mode,MODE_SYSTEM
-        jne     done_data
+        je     FDF_SKIP_008
+        jmp     done_data
+FDF_SKIP_008:
         mov     dx,offset msg_install
         call    puts
         call    install_system
-        jc      io_failed
+        jnc     FDF_SKIP_009
+        jmp     io_failed
+FDF_SKIP_009:
         call    verify_system
-        jc      io_failed
+        jnc     FDF_SKIP_010
+        jmp     io_failed
+FDF_SKIP_010:
         mov     dx,offset msg_done_system
         call    puts
         jmp     reset_exit
@@ -134,47 +154,75 @@ parse_tail:
         mov     si,081h
 pt_loop:
         or      cx,cx
-        jz      pt_done
+        jnz     FDF_SKIP_011
+        jmp     pt_done
+FDF_SKIP_011:
         mov     al,[si]
         cmp     al,' '
-        je      pt_next
+        jne     FDF_SKIP_012
+        jmp     pt_next
+FDF_SKIP_012:
         cmp     al,9
-        je      pt_next
+        jne     FDF_SKIP_013
+        jmp     pt_next
+FDF_SKIP_013:
         cmp     al,':'
-        je      pt_next
+        jne     FDF_SKIP_014
+        jmp     pt_next
+FDF_SKIP_014:
         cmp     al,'/'
-        je      pt_option
+        jne     FDF_SKIP_015
+        jmp     pt_option
+FDF_SKIP_015:
         cmp     al,'-'
-        je      pt_option
+        jne     FDF_SKIP_016
+        jmp     pt_option
+FDF_SKIP_016:
         call    uppercase
         cmp     al,'A'
-        jb      pt_bad
+        jae     FDF_SKIP_017
+        jmp     pt_bad
+FDF_SKIP_017:
         cmp     al,'H'
-        ja      pt_bad
+        jbe     FDF_SKIP_018
+        jmp     pt_bad
+FDF_SKIP_018:
         cmp     Byte Ptr target_drive,0ffh
-        jne     pt_bad
+        je     FDF_SKIP_019
+        jmp     pt_bad
+FDF_SKIP_019:
         sub     al,'A'
         mov     Byte Ptr target_drive,al
         jmp     pt_next
 pt_option:
         inc     si
         dec     cx
-        jz      pt_bad
+        jnz     FDF_SKIP_020
+        jmp     pt_bad
+FDF_SKIP_020:
         mov     al,[si]
         call    uppercase
         cmp     al,'S'
-        je      pt_system
+        jne     FDF_SKIP_021
+        jmp     pt_system
+FDF_SKIP_021:
         cmp     al,'L'
-        je      pt_low
+        jne     FDF_SKIP_022
+        jmp     pt_low
+FDF_SKIP_022:
         jmp     pt_bad
 pt_system:
         cmp     Byte Ptr mode,MODE_DATA
-        jne     pt_bad
+        je     FDF_SKIP_023
+        jmp     pt_bad
+FDF_SKIP_023:
         mov     Byte Ptr mode,MODE_SYSTEM
         jmp     pt_next
 pt_low:
         cmp     Byte Ptr mode,MODE_DATA
-        jne     pt_bad
+        je     FDF_SKIP_024
+        jmp     pt_bad
+FDF_SKIP_024:
         mov     Byte Ptr mode,MODE_LOW
 pt_next:
         inc     si
@@ -182,7 +230,9 @@ pt_next:
         jmp     pt_loop
 pt_done:
         cmp     Byte Ptr target_drive,0ffh
-        je      pt_bad
+        jne     FDF_SKIP_025
+        jmp     pt_bad
+FDF_SKIP_025:
         clc
         ret
 pt_bad:
@@ -191,9 +241,13 @@ pt_bad:
 
 uppercase:
         cmp     al,'a'
-        jb      up_done
+        jae     FDF_SKIP_026
+        jmp     up_done
+FDF_SKIP_026:
         cmp     al,'z'
-        ja      up_done
+        jbe     FDF_SKIP_027
+        jmp     up_done
+FDF_SKIP_027:
         and     al,05fh
 up_done:
         ret
@@ -209,22 +263,32 @@ find_source:
         mov     al,Byte Ptr es:[BDOS_CURDRV]
         pop     es
         cmp     al,0
-        je      fs_source_ok
+        jne     FDF_SKIP_028
+        jmp     fs_source_ok
+FDF_SKIP_028:
         cmp     al,4
-        jne     fs_source_bad
+        je     FDF_SKIP_029
+        jmp     fs_source_bad
+FDF_SKIP_029:
 fs_source_ok:
         mov     Byte Ptr source_drive,al
         mov     bl,al
         mov     al,Byte Ptr target_drive
         cmp     al,4
-        jb      fs_target_2d
+        jae     FDF_SKIP_030
+        jmp     fs_target_2d
+FDF_SKIP_030:
         cmp     bl,4
-        jne     fs_source_bad
+        je     FDF_SKIP_031
+        jmp     fs_source_bad
+FDF_SKIP_031:
         clc
         ret
 fs_target_2d:
         cmp     bl,0
-        jne     fs_source_bad
+        je     FDF_SKIP_032
+        jmp     fs_source_bad
+FDF_SKIP_032:
         clc
         ret
 fs_source_bad:
@@ -236,7 +300,9 @@ fs_source_bad:
 set_geometry:
         mov     al,Byte Ptr io_drive
         cmp     al,4
-        jb      sg_2d
+        jae     FDF_SKIP_033
+        jmp     sg_2d
+FDF_SKIP_033:
         sub     al,4
         mov     Byte Ptr io_unit,al
         mov     Byte Ptr io_channel,1
@@ -263,7 +329,9 @@ sr_loop:
         mov     Word Ptr io_size,256
         mov     Byte Ptr io_write,0
         call    disk_transfer
-        jc      sr_error
+        jnc     FDF_SKIP_034
+        jmp     sr_error
+FDF_SKIP_034:
         push    cx
         push    si
         push    di
@@ -283,11 +351,15 @@ sr_loop:
         add     Word Ptr image_offset,256
         call    advance_sector
         dec     Word Ptr remaining
-        jnz     sr_loop
+        jz     FDF_SKIP_035
+        jmp     sr_loop
+FDF_SKIP_035:
         ; Resident CBIOS begins immediately after the 0x2500-byte
         ; external CCP/BDOS core.
         cmp     Byte Ptr system_image+02500h,0e9h
-        jne     sr_error
+        je     FDF_SKIP_036
+        jmp     sr_error
+FDF_SKIP_036:
         clc
         ret
 sr_error:
@@ -299,7 +371,9 @@ position_resident:
         mov     Byte Ptr io_head,0
         mov     Byte Ptr io_sector,3
         cmp     Byte Ptr io_channel,0
-        je      pr_done
+        jne     FDF_SKIP_037
+        jmp     pr_done
+FDF_SKIP_037:
         mov     Byte Ptr io_head,1
         mov     Byte Ptr io_sector,1
 pr_done:
@@ -309,10 +383,14 @@ advance_sector:
         inc     Byte Ptr io_sector
         mov     al,Byte Ptr io_sector
         cmp     al,Byte Ptr sectors_per_side
-        jbe     adv_done
+        ja     FDF_SKIP_038
+        jmp     adv_done
+FDF_SKIP_038:
         mov     Byte Ptr io_sector,1
         xor     Byte Ptr io_head,1
-        jnz     adv_done
+        jz     FDF_SKIP_039
+        jmp     adv_done
+FDF_SKIP_039:
         inc     Byte Ptr io_cyl
 adv_done:
         ret
@@ -336,20 +414,30 @@ initialize_media:
 im_loop:
         mov     Word Ptr io_size,256
         cmp     Byte Ptr io_channel,0
-        je      im_regular
+        jne     FDF_SKIP_040
+        jmp     im_regular
+FDF_SKIP_040:
         cmp     Byte Ptr io_cyl,0
-        jne     im_regular
+        je     FDF_SKIP_041
+        jmp     im_regular
+FDF_SKIP_041:
         cmp     Byte Ptr io_head,0
-        jne     im_regular
+        je     FDF_SKIP_042
+        jmp     im_regular
+FDF_SKIP_042:
         mov     Word Ptr io_size,128
 im_regular:
         mov     Byte Ptr io_write,1
         call    disk_transfer
-        jc      im_fail
+        jnc     FDF_SKIP_043
+        jmp     im_fail
+FDF_SKIP_043:
         call    advance_sector
         mov     al,Byte Ptr io_cyl
         cmp     al,Byte Ptr cylinders
-        jb      im_loop
+        jae     FDF_SKIP_044
+        jmp     im_loop
+FDF_SKIP_044:
         clc
         ret
 im_fail:
@@ -367,7 +455,9 @@ install_system:
         mov     Word Ptr image_offset,0
         mov     Word Ptr remaining,2
         cmp     Byte Ptr io_channel,0
-        je      is_ipl_loop
+        jne     FDF_SKIP_045
+        jmp     is_ipl_loop
+FDF_SKIP_045:
         mov     Word Ptr remaining,4
 is_ipl_loop:
         push    cx
@@ -380,7 +470,9 @@ is_ipl_loop:
         mov     si,offset fdipl2d_template
         mov     cx,128
         cmp     Byte Ptr io_channel,0
-        je      is_copy_ipl
+        jne     FDF_SKIP_046
+        jmp     is_copy_ipl
+FDF_SKIP_046:
         mov     si,offset fdipl2hd_template
         mov     cx,64
 is_copy_ipl:
@@ -393,17 +485,23 @@ is_copy_ipl:
         pop     cx
         mov     Word Ptr io_size,256
         cmp     Byte Ptr io_channel,0
-        je      is_write_ipl
+        jne     FDF_SKIP_047
+        jmp     is_write_ipl
+FDF_SKIP_047:
         mov     Word Ptr io_size,128
 is_write_ipl:
         mov     Byte Ptr io_write,1
         call    disk_transfer
-        jc      is_fail
+        jnc     FDF_SKIP_048
+        jmp     is_fail
+FDF_SKIP_048:
         mov     ax,Word Ptr io_size
         add     Word Ptr image_offset,ax
         call    advance_sector
         dec     Word Ptr remaining
-        jnz     is_ipl_loop
+        jz     FDF_SKIP_049
+        jmp     is_ipl_loop
+FDF_SKIP_049:
 
         call    position_resident
         mov     Word Ptr image_offset,0
@@ -413,11 +511,15 @@ is_resident_loop:
         mov     Word Ptr io_size,256
         mov     Byte Ptr io_write,1
         call    disk_transfer
-        jc      is_fail
+        jnc     FDF_SKIP_050
+        jmp     is_fail
+FDF_SKIP_050:
         add     Word Ptr image_offset,256
         call    advance_sector
         dec     Word Ptr remaining
-        jnz     is_resident_loop
+        jz     FDF_SKIP_051
+        jmp     is_resident_loop
+FDF_SKIP_051:
         clc
         ret
 is_fail:
@@ -454,7 +556,9 @@ vs_loop:
         mov     Word Ptr io_size,256
         mov     Byte Ptr io_write,0
         call    disk_transfer
-        jc      vs_fail
+        jnc     FDF_SKIP_052
+        jmp     vs_fail
+FDF_SKIP_052:
         push    cx
         push    si
         push    di
@@ -471,11 +575,15 @@ vs_loop:
         pop     di
         pop     si
         pop     cx
-        jne     vs_fail
+        je     FDF_SKIP_053
+        jmp     vs_fail
+FDF_SKIP_053:
         add     Word Ptr image_offset,256
         call    advance_sector
         dec     Word Ptr remaining
-        jnz     vs_loop
+        jz     FDF_SKIP_054
+        jmp     vs_loop
+FDF_SKIP_054:
         clc
         ret
 vs_fail:
@@ -502,9 +610,13 @@ disk_transfer:
         add     ax,offset sectorbuf
         adc     dx,0
         cmp     ax,0ff00h
-        ja      dt_bad
+        jbe     FDF_SKIP_055
+        jmp     dt_bad
+FDF_SKIP_055:
         cmp     dx,15
-        ja      dt_bad
+        jbe     FDF_SKIP_056
+        jmp     dt_bad
+FDF_SKIP_056:
         mov     si,ax
         mov     di,dx
 
@@ -518,7 +630,9 @@ disk_transfer:
 
         mov     dx,010h
         cmp     Byte Ptr io_channel,0
-        je      dt_addr
+        jne     FDF_SKIP_057
+        jmp     dt_addr
+FDF_SKIP_057:
         mov     dl,012h
 dt_addr:
         mov     ax,si
@@ -528,7 +642,9 @@ dt_addr:
 
         mov     dx,011h
         cmp     Byte Ptr io_channel,0
-        je      dt_count
+        jne     FDF_SKIP_058
+        jmp     dt_count
+FDF_SKIP_058:
         mov     dl,013h
 dt_count:
         mov     ax,Word Ptr io_size
@@ -539,7 +655,9 @@ dt_count:
 
         mov     dx,020h
         cmp     Byte Ptr io_channel,0
-        je      dt_bank
+        jne     FDF_SKIP_059
+        jmp     dt_bank
+FDF_SKIP_059:
         mov     dl,021h
 dt_bank:
         mov     ax,di
@@ -548,7 +666,9 @@ dt_bank:
         mov     dx,01bh
         mov     al,044h
         cmp     Byte Ptr io_write,0
-        je      dt_mode
+        jne     FDF_SKIP_060
+        jmp     dt_mode
+FDF_SKIP_060:
         mov     al,048h
 dt_mode:
         add     al,Byte Ptr io_channel
@@ -558,7 +678,9 @@ dt_mode:
 
         mov     dx,0fd19h
         cmp     Byte Ptr io_channel,0
-        je      dt_track
+        jne     FDF_SKIP_061
+        jmp     dt_track
+FDF_SKIP_061:
         mov     dl,031h
 dt_track:
         mov     al,Byte Ptr io_cyl
@@ -569,7 +691,9 @@ dt_track:
 
         mov     dx,0fd1ch
         cmp     Byte Ptr io_channel,0
-        je      dt_side
+        jne     FDF_SKIP_062
+        jmp     dt_side
+FDF_SKIP_062:
         mov     dl,034h
 dt_side:
         mov     al,Byte Ptr io_head
@@ -584,12 +708,16 @@ dt_side:
 
         mov     dx,0fd18h
         cmp     Byte Ptr io_channel,0
-        je      dt_command
+        jne     FDF_SKIP_063
+        jmp     dt_command
+FDF_SKIP_063:
         mov     dl,030h
 dt_command:
         mov     al,080h
         cmp     Byte Ptr io_write,0
-        je      dt_start
+        jne     FDF_SKIP_064
+        jmp     dt_start
+FDF_SKIP_064:
         mov     al,0a0h
 dt_start:
         out     dx,al
@@ -597,24 +725,36 @@ dt_start:
 dt_poll:
         in      al,dx
         test    al,010h
-        jnz     dt_fail
+        jz     FDF_SKIP_065
+        jmp     dt_fail
+FDF_SKIP_065:
         test    al,002h
-        jz      dt_check
+        jnz     FDF_SKIP_066
+        jmp     dt_check
+FDF_SKIP_066:
         loop    dt_poll
         jmp     dt_fail
 dt_check:
         or      al,al
-        jnz     dt_fail
+        jz     FDF_SKIP_067
+        jmp     dt_fail
+FDF_SKIP_067:
         mov     dx,018h
         in      al,dx
         cmp     Byte Ptr io_channel,0
-        je      dt_tc0
+        jne     FDF_SKIP_068
+        jmp     dt_tc0
+FDF_SKIP_068:
         test    al,2
-        jz      dt_fail
+        jnz     FDF_SKIP_069
+        jmp     dt_fail
+FDF_SKIP_069:
         jmp     dt_ok
 dt_tc0:
         test    al,1
-        jz      dt_fail
+        jnz     FDF_SKIP_070
+        jmp     dt_fail
+FDF_SKIP_070:
 dt_ok:
         clc
         jmp     dt_finish
@@ -661,20 +801,22 @@ crlf:
 hex8:
         push    ax
         push    cx
-        mov     ah,al
         mov     cl,4
         shr     al,cl
         call    hex_nibble
-        mov     al,ah
+        pop     cx
+        pop     ax
+        push    ax
         and     al,0fh
         call    hex_nibble
-        pop     cx
         pop     ax
         ret
 hex_nibble:
         add     al,'0'
         cmp     al,'9'
-        jbe     hn_out
+        ja     FDF_SKIP_071
+        jmp     hn_out
+FDF_SKIP_071:
         add     al,7
 hn_out:
         jmp     putc
