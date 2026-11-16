@@ -34,8 +34,9 @@ not yet verified.
   The special boot track has different sector sizes; IPL must account for it.
 - CP/M physical sectors need 128-byte logical record deblocking.
 
-The first disk-BIOS step now provides DPH/DPB records for A:..D: as four
-independent 2D units. The provisional filesystem parameters are:
+The disk BIOS now provides DPH/DPB records for eight independent units:
+A:..D: are 2D Mini-FDC drives 0..3 and E:..H: are standard-FDC 2HD
+units 0..3. The logical drive mapping is independent of the boot source. The 2D filesystem parameters are:
 
 - 32 CP/M records (128 bytes each) per logical side-track.
 - 2 KiB allocation blocks; 152 data blocks numbered 0..151.
@@ -70,9 +71,17 @@ sector back.  This preserves the other 128-byte record without a
 dirty-sector cache or deferred flush.  Both operations return AL=0 on
 success and AL=1 on error.
 
-**Limitations:** Only Mini-FDC drive 0 is supported by the current
-emulator; attempts to perform CP/M disk I/O on drives B:..D: are
-rejected, despite the provisional DPH entries.  Each record write
+**2HD implementation:** Standard-FDC drives 0..3 use DMA channel 1,
+FD30h..FD35h, 26 physical sectors per side-track and 52 CP/M records.
+The 2HD DPB uses 4-KiB blocks (DSM=242, EXM=3), four reserved
+side-tracks and separate CSV/ALV for E:..H:. Physical sector I/O uses
+the same 256-byte bounce and 128-byte read/modify/write paths as 2D.
+The 2HD boot image has 26x128-byte FM records on C0/H0, a 512-byte
+IPL, and 62x256-byte resident sectors from C0/H1 onward. The 2HD
+CBIOS variant starts the CCP on E: rather than A:.
+
+**Limitations:** Full emulator-level runtime validation of CP/M-86
+2HD boot and all eight drives is still outstanding.  Each record write
 performs a physical read and write.  No retry, media-change detection,
 or real-hardware timing validation is implemented.  The bounce buffer
 is checked against the 8237 64 KiB page boundary, and the caller DMA
@@ -81,7 +90,7 @@ establish the final resident segment and validate memory ownership.
 
 The 2D IPL first-stage ROM and image generator are present. Next verify
 actual cold boot through INIT, the CCP/BDOS core, and filesystem access,
-then extend the controller for additional drive units and 2HD media.
+then verify all additional 2D/2HD units and the 2HD boot image in the emulator.
 
 ## Known emulator integration questions
 
