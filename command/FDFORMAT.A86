@@ -862,3 +862,4 @@ system_image    rs      03e00h
 local_stack     rs      1024
 local_stack_top db      0
 end
+
