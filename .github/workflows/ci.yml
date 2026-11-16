@@ -10,4 +10,7 @@ jobs:
       - name: Install NASM
         run: sudo apt-get update -qq && sudo apt-get install -y nasm
       - name: Verify CBIOS and 2HD image layout
-        run: make test
+        run: |
+          make build/cbios.bin
+          xxd -l 100 build/cbios.bin
+          make test
