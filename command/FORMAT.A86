@@ -1249,11 +1249,11 @@ hdd_chs_ok:
         adc     dx,0
         cmp     ax,0ff00h
         jbe     hdd_buf_safe
-        mov     Word Ptr hdd_dma_ptr,offset hdd_bounce
+        mov     Word Ptr hdd_dma_ptr,offset sectorbuf+256
         mov     ax,ds
         mov     bx,16
         mul     bx
-        add     ax,offset hdd_bounce
+        add     ax,offset sectorbuf+256
         adc     dx,0
         cmp     ax,0ff00h
         ja      hdd_io_bad
@@ -1445,7 +1445,6 @@ hdd_dma_ptr     dw      0
 hdd_dma_addr    dw      0
 hdd_dma_bank    db      0
 hdd_result      rs      10
-hdd_bounce      rs      256
 
 
 msg_title       db      0dh,0ah,'FM-11 CP/M-86 FORMAT',0dh,0ah,'
@@ -1467,7 +1466,8 @@ msg_done_low    db      'Physical format complete (/L).',0dh,0ah,'$'
 INCLUDE FDIPL2D.INC
 INCLUDE FDIPL2HD.INC
 
-sectorbuf       rs      256
+; 512 bytes ensure one 256-byte DMA buffer fits a physical 64-KiB page.
+sectorbuf       rs      512
 system_image    rs      03e00h
 ; Two alternative 10,900-byte DMA regions; select one that stays
 ; within a physical 64-KiB DMA page.
