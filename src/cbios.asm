@@ -77,6 +77,9 @@ INIT:
     mov word [cur_sector],0
     mov word [dma_off],0x0080
     mov [dma_seg],cs
+    ; Before giving BDOS the memory region table, detect installed RAM.
+    ; Keep 0400h:0000h-3FFFh resident and all probing side-effect-free.
+    call init_mrt
     mov si,hello
     call serial_puts
 
@@ -383,6 +386,62 @@ SECTRAN:
 
 GETSEGT:
     mov bx,mrt
+    ret
+
+; Initialize CP/M-86 Memory Region Table for the installed FM-11 RAM.
+;
+; The 8088 bus is 20-bit and mirrors addresses beyond the fitted RAM
+; (128 KiB increments) back into populated RAM.  Probe at the SAME
+; offset as a byte owned by this CBIOS in each successive 128 KiB bank:
+; 0400:anchor, 2400:anchor, 4400:anchor, ... E400:anchor.
+; The first mirror is the installed RAM boundary.  The anchor is set
+; to a known value, and both the remote probe byte and the original
+; anchor are restored before returning.  The remote addresses are all
+; in the TPA when populated and never overlap the resident image.
+;
+; Keep CS/DS invariant (INIT has DS=CS), preserve ES and all scratch
+; registers, and never access the 1 MiB ROM overlay while probing.
+; For 1024 KiB, none of the seven candidates aliases the anchor.
+; The top 4 KiB (physical FF000h..FFFFFh) is ROM, not CP/M TPA.
+;
+; MRT entry is one region: start segment 0800h (physical 08000h),
+; length in paragraphs.  BDOS/CCP/CBIOS remain below 08000h.
+init_mrt:
+    push ax
+    push bx
+    push cx
+    push dx
+    push si
+    push es
+    mov si,[ram_probe_anchor]
+    mov byte [ram_probe_anchor],0x5a
+    mov bx,0x2400            ; first candidate: physical 24000h
+    mov cx,7                 ; 128,256,...,896 KiB boundaries
+.probe:
+    mov es,bx
+    mov dl,[es:ram_probe_anchor]
+    mov byte [es:ram_probe_anchor],0xa5
+    cmp byte [ram_probe_anchor],0xa5
+    mov [es:ram_probe_anchor],dl
+    je .found
+    add bx,0x2000
+    loop .probe
+    ; Full 1 MiB: avoid the 4 KiB reset ROM overlay at FF000h.
+    mov word [mrt_tpa_len],0xf700  ; FF00h - 0800h
+    jmp short .done
+.found:
+    ; Candidate segment = 0400h + installed RAM / 16.
+    ; TPA size in paragraphs = installed RAM / 16 - 0800h.
+    sub bx,0x0c00
+    mov [mrt_tpa_len],bx
+.done:
+    mov [ram_probe_anchor],si
+    pop es
+    pop si
+    pop dx
+    pop cx
+    pop bx
+    pop ax
     ret
 
 GETIOBF:
@@ -696,10 +755,15 @@ alv6: times 31 db 0
 alv7: times 31 db 0
 alv8: times 514 db 0        ; maximum ~4103 allocation blocks
 
-; Memory region table is provisional and must be validated before boot.
+; CP/M-86 Memory Region Table (GETSEGT). INIT updates the length after
+; non-destructive physical RAM alias detection; 512 KiB is fallback.
 mrt:
     db 1
-    dw 0x0800,0x7800
+    dw 0x0800
+mrt_tpa_len:
+    dw 0x7800
+ram_probe_anchor:
+    db 0
 
 ; Pad the CBIOS itself (not the optional 0x2500-byte preceding core).
 times BIOS_SIZE - ($ - bios_start) db 0
