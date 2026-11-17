@@ -499,7 +499,7 @@ rw_2d:
     ; READ: track cache -> caller's 128-byte DMA record.
     mov ds,ax
     mov si,bx
-    mov di,[dma_off]
+    mov di,[cs:dma_off]        ; DS now points to cache, not BIOS
     mov ax,[cs:dma_seg]
     mov es,ax
     mov cx,64
