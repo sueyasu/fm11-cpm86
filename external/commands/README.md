@@ -1,13 +1,19 @@
-# External CP/M-86 commands
+# External CP/M-86 disk files
 
-Place your CP/M-86 `.CMD` programs here (e.g. `PIP.CMD`, `STAT.CMD`).
-Files with `.CMD` or `.cmd` extensions are automatically included
-in `build/fm11_cpm86_2d.img` by `make boot`.
+Place any CP/M-compatible 8.3-named regular files here:
+`FDFORMAT.A86`, `FDIPL2D.INC`, `FDIPL2HD.INC`,
+`PIP.CMD`, `NOTES.TXT`, and so on.
 
-Only valid CP/M 8.3 filenames are supported. The generated disk image
-uses the native FM-11 2D format and is intended for the 8088 emulator
-and compatible hardware. Command binaries are external inputs and are
-not tracked here.
+All files except this host-only `README.md` are automatically added
+to both the 2D and 2HD images by `make boot-d88` or `make boot-2hd`.
+They are stored byte-for-byte as CP/M files; text is not converted,
+so an ASM86 source should already have CRLF and Ctrl-Z if required.
 
-Run `make -B boot` to force a rebuild after removing a command file,
-since Make does not otherwise track the disappearance of wildcard matches.
+Only standard CP/M 8.3 names and characters are supported. File names
+are converted to uppercase, and duplicate names (case-insensitive),
+disk-capacity and directory-capacity errors abort image generation.
+
+Use `make -B boot-d88` or `make -B boot-2hd` after **removing**
+a file: Make cannot notice a disappeared wildcard prerequisite.
+The supplied source code and tool binaries are external inputs and
+are not tracked in this directory.
