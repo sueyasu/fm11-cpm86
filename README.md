@@ -407,6 +407,41 @@ CBIOS `READ`/`WRITE`, not just direct FDC register access. The
 serial output, not the static `make test` result, establishes whether
 the emulated FDC, DMA, and CBIOS work together.
 
+## CBIOS track write-back cache
+
+The FM-11 CBIOS uses two **8 KiB track windows** shared by A:..I:
+(2D/2HD FDD and MDC HDD). Each stores one physical side/head-track,
+lazily populated in 256-byte sectors; a separate 32-bit valid bitmap
+and dirty bitmap per window avoid unnecessary physical I/O. PIP copies
+between two drives can keep one source and one destination track
+resident at the same time. Normal WRITE only updates the window.
+
+For safety, the cache flushes **all pending dirty sectors** when
+writing a CP/M directory record (BIOS WRITE with CL=1), when a dirty
+window must be replaced, on first-login SELDSK and on WBOOT.
+A directory update is ordered *after* dirty file data. A failed
+physical write leaves its dirty bit set; unsafe eviction is rejected.
+Both windows are carved from the top of the detected RAM and removed
+from the GETSEGT memory region table (16 KiB total). 128 KiB RAM
+therefore reports an 80 KiB TPA, instead of the old 96 KiB.
+
+**Important:** Writes are not automatically durable just because a
+normal BIOS WRITE returns. A program that bypasses the BIOS disk API,
+such as a direct-FDC format tool, must not be used on a drive with
+unflushed track-cache data. Also avoid removing/replacing a medium
+while dirty data might be cached. There is not yet an explicit cache
+sync/invalidate ABI for direct-controller utilities; until that is
+implemented, reboot normally after finishing file I/O before direct
+formatting or exchanging media. Host emulator `fdatasync` runs on its
+own schedule and does not replace the guest cache's flush.
+
+Check the fixed resident images and static invariants with `make test`.
+Build a disposable guest self-test resident with
+`make build/cbios_selftest_resident.bin`; the self-test now measures
+physical read/write counts and flushes its changed sector back to the
+scratch medium. Runtime PIP verification and real-hardware testing
+remain necessary.
+
 ## Experimental CP/M-86 2D cold boot
 
 The new `src/iplrom.asm` reads **62 contiguous physical sectors**
