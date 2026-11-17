@@ -245,6 +245,7 @@ rw_2d:
     jmp .track_checked
 .check_2d_track:
     cmp bx,80               ; 2D: 40 cylinders * 2 side-tracks
+    jmp .track_checked
 .hdd_track:
     cmp bx,[hdd_total_tracks]
 .track_checked:
@@ -266,6 +267,7 @@ rw_2d:
     jmp .sector_checked
 .check_2d_sector:
     cmp bx,32               ; 2D: 16 * 2 logical records
+    jmp .sector_checked
 .hdd_sector:
     cmp bx,64
 .sector_checked:
