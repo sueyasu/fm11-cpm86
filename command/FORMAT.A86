@@ -1253,6 +1253,133 @@ hdd_init_fail:
         stc
         ret
 
+; HDD boot layout shared with build_boot_hdd.py:
+; LBA 0-1: 512-byte IPL; LBA 2-63: 62 resident sectors.
+; Always read the source resident into system_image before initializing.
+hdd_install_system:
+        mov     Word Ptr hdd_cyl,0
+        mov     Byte Ptr hdd_head,0
+        mov     Byte Ptr hdd_sector,0
+        mov     Word Ptr image_offset,0
+        mov     Word Ptr remaining,2
+hdd_install_ipl:
+        mov     si,offset hdipl_template
+        add     si,Word Ptr image_offset
+        call    hdd_copy_to_sectorbuf
+        call    hdd_write_sector
+        jnc     hdd_ipl_written
+        jmp     hdd_install_bad
+hdd_ipl_written:
+        call    hdd_advance
+        add     Word Ptr image_offset,256
+        dec     Word Ptr remaining
+        jnz     hdd_install_ipl
+        mov     Word Ptr image_offset,0
+        mov     Word Ptr remaining,RES_SECTORS
+hdd_install_resident:
+        mov     si,offset system_image
+        add     si,Word Ptr image_offset
+        call    hdd_copy_to_sectorbuf
+        call    hdd_write_sector
+        jnc     hdd_resident_written
+        jmp     hdd_install_bad
+hdd_resident_written:
+        call    hdd_advance
+        add     Word Ptr image_offset,256
+        dec     Word Ptr remaining
+        jnz     hdd_install_resident
+        clc
+        ret
+hdd_install_bad:
+        stc
+        ret
+
+; DS:SI points at exactly 256 bytes, copy them into sectorbuf.
+hdd_copy_to_sectorbuf:
+        push    cx
+        push    di
+        push    es
+        push    ds
+        pop     es
+        mov     di,offset sectorbuf
+        mov     cx,128
+        cld
+        rep     movsw
+        pop     es
+        pop     di
+        pop     cx
+        ret
+
+; Verify every physical sector of the HDD IPL and resident after /S.
+; Compare from the actual controller DMA read, not the write buffer.
+hdd_verify_system:
+        mov     Word Ptr hdd_cyl,0
+        mov     Byte Ptr hdd_head,0
+        mov     Byte Ptr hdd_sector,0
+        mov     Word Ptr image_offset,0
+        mov     Word Ptr remaining,2
+hdd_verify_ipl:
+        call    hdd_read_sector
+        jnc     hdd_verify_ipl_read
+        jmp     hdd_verify_bad
+hdd_verify_ipl_read:
+        mov     di,offset hdipl_template
+        add     di,Word Ptr image_offset
+        call    hdd_compare_sector
+        jnc     hdd_verified_ipl
+        jmp     hdd_verify_bad
+hdd_verified_ipl:
+        call    hdd_advance
+        add     Word Ptr image_offset,256
+        dec     Word Ptr remaining
+        jnz     hdd_verify_ipl
+        mov     Word Ptr image_offset,0
+        mov     Word Ptr remaining,RES_SECTORS
+hdd_verify_resident:
+        call    hdd_read_sector
+        jnc     hdd_verify_resident_read
+        jmp     hdd_verify_bad
+hdd_verify_resident_read:
+        mov     di,offset system_image
+        add     di,Word Ptr image_offset
+        call    hdd_compare_sector
+        jnc     hdd_verified_resident
+        jmp     hdd_verify_bad
+hdd_verified_resident:
+        call    hdd_advance
+        add     Word Ptr image_offset,256
+        dec     Word Ptr remaining
+        jnz     hdd_verify_resident
+        clc
+        ret
+hdd_verify_bad:
+        stc
+        ret
+
+; DS:DI expected 256 bytes; DS:sectorbuf is the 256 bytes read.
+hdd_compare_sector:
+        push    cx
+        push    si
+        push    di
+        push    es
+        push    ds
+        pop     es
+        mov     si,offset sectorbuf
+        mov     cx,128
+        cld
+        repe    cmpsw
+        jne     hdd_compare_bad
+        clc
+        jmp     hdd_compare_done
+hdd_compare_bad:
+        stc
+hdd_compare_done:
+        pop     es
+        pop     di
+        pop     si
+        pop     cx
+        ret
+
 hdd_advance:
         inc     Byte Ptr hdd_sector
         cmp     Byte Ptr hdd_sector,HDD_SPT
