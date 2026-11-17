@@ -329,6 +329,31 @@ selftest_entry:
     mov ax,[cache_phys_reads]
     cmp ax,[st_cache_read_before]
     ST_CHECK_EQ
+    ; Access a second track, then return to the first. Both windows
+    ; must coexist; returning to record 31 must not trigger a re-READ.
+    mov cx,78
+    call SETTRK
+    mov cx,0
+    call SETSEC
+    mov cx,ST_CHECK
+    call SETDMA
+    call READ
+    or ax,ax
+    ST_CHECK_Z
+    mov ax,[cache_phys_reads]
+    mov [st_cache_read_before],ax
+    mov cx,79
+    call SETTRK
+    mov cx,31
+    call SETSEC
+    mov cx,ST_SAVE
+    call SETDMA
+    call READ
+    or ax,ax
+    ST_CHECK_Z
+    mov ax,[cache_phys_reads]
+    cmp ax,[st_cache_read_before]
+    ST_CHECK_EQ
     push ds
     mov ax,ST_SEG
     mov ds,ax
@@ -491,6 +516,8 @@ st_restore_failed:
     jz .restore_success
     jmp st_restore_bad
 .restore_success:
+    call cache_flush_all
+    jc st_restore_bad
     mov byte [st_dirty],0
     jmp st_fail
 
@@ -522,6 +549,8 @@ st_fail:
     jz .restored
     jmp st_restore_bad
 .restored:
+    call cache_flush_all
+    jc st_restore_bad
     mov byte [st_dirty],0
 st_halt:
     cli
@@ -597,7 +626,7 @@ st_read_ok db 'PASS READ directory ASM86.CMD',13,10,0
 st_key_prompt db 'Press one key for CONIN test: ',0
 st_key_ok db 13,10,'PASS CONIN',13,10,0
 st_write_ok db 'PASS WRITE/READ/RESTORE',13,10,0
-st_cache_ok db 'PASS CACHE PAIR/HIT/TRACK-WRITEBACK/RELOGIN',13,10,0
+st_cache_ok db 'PASS CACHE 2-WINDOW/HIT/WRITEBACK/RELOGIN',13,10,0
 st_write_bad db 'FAIL WRITE verify; restoring...',13,10,0
 st_restore_bad_msg db 'FAIL RESTORE: disposable disk changed',13,10,0
 st_pass db 'PASS CBIOS SELFTEST',13,10,0
