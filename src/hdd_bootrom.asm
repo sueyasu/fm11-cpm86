@@ -23,13 +23,26 @@ entry:
     out 0x01,al
     mov al,0xff
     out 0x01,al
-    ; Optional serial attach gate; local console must boot without PTY.
-%if CONSOLE_LOCAL = 0
+    ; Initialize USART0 even for local boot: STAT may later select
+    ; TTY or mirrored UC1. Do not reset an already-ready transmitter;
+    ; dropping DTR would disconnect an existing PTY attachment.
     mov dx,0xfd07
+    in al,dx
+    test al,1
+    jnz .serial_ready
+    xor al,al
+    out dx,al
+    out dx,al
+    out dx,al
+    mov al,0x40
+    out dx,al
     mov al,0x4e
     out dx,al
     mov al,0x37
     out dx,al
+.serial_ready:
+    ; Serial-default builds retain their original optional input gate.
+%if CONSOLE_LOCAL = 0
 .wait_input:
     in al,dx
     test al,2
