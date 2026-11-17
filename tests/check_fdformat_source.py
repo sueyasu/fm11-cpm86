@@ -36,6 +36,14 @@ assert not re.search(r"\b(?:es|cs|ss|ds):\s*\[", instructions, re.I), ("ASM86 1.
 # 080h becomes an immediate length of 128 rather than the CP/M basepage.
 assert "mov     cl,Byte Ptr .080h" in source
 assert "mov     cl,Byte Ptr 080h" not in source
+# ASM86 1.1 rejects MASM-style [SI+displacement] for this source.
+assert not re.search(r"\\[(?:si|di|bx|bp)\\s*\\+\\s*\\d+\\]", instructions, re.I)
+assert len(re.findall(r"^end\\s*$", source, re.M | re.I)) == 1
+assert len(re.findall(r"^msg_source_error\\s+db\\b", source, re.M | re.I)) == 1
+assert len(re.findall(r"^msg_patch_error\\s+db\\b", source, re.M | re.I)) == 1
+for line in source.splitlines():
+    if re.match(r"^msg_(?:source|patch)_error\\b", line):
+        assert line.count("'") == 2, f"unclosed string: {line}"
 assert "mov     bx,BDOS_CURDRV" in source
 assert "mov     al,[bx]" in source
 assert "Byte Ptr [BDOS_CURDRV]" not in source
