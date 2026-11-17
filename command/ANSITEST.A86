@@ -1,0 +1,212 @@
+; ANSITEST.A86 -- FM-11 CP/M-86 ANSI/VT100 local console test.
+; Build on CP/M-86: ASM86 ANSITEST.A86 / GENCMD ANSITEST
+; Run: ANSITEST  (ideally after STAT CON:=CRT: or UC1:)
+; Does not access disks or hardware directly. BDOS CONOUT is used.
+; Each page pauses for a key so a human can inspect the screen.
+;
+BDOSINT         equ     0e0h
+ESC             equ     01bh
+CR              equ     0dh
+LF              equ     0ah
+
+cseg
+start:
+        mov     dx,offset intro
+        call    puts
+        call    wait_key
+
+        ; Test 1: absolute/relative positions, row/column commands.
+        mov     dx,offset t1
+        call    puts
+        call    wait_key
+
+        ; Test 2: erase-in-line modes K.
+        mov     dx,offset t2
+        call    puts
+        call    wait_key
+
+        ; Test 3: erase characters X, without moving the cursor.
+        mov     dx,offset t3
+        call    puts
+        call    wait_key
+
+        ; Test 4: erase from cursor to screen end (0J).
+        mov     dx,offset t4
+        call    puts
+        call    wait_key
+
+        ; Test 5: erase from screen start to cursor (1J).
+        mov     dx,offset t5
+        call    puts
+        call    wait_key
+
+        ; Test 6: clear screen without moving cursor (2J).
+        mov     dx,offset t6
+        call    puts
+        call    wait_key
+
+        ; Test 7: attributes and foreground colors.
+        mov     dx,offset t7
+        call    puts
+        call    wait_key
+
+        ; Test 8: cursor save/restore, VT100 ESC 7/8 and CSI s/u.
+        mov     dx,offset t8
+        call    puts
+        call    wait_key
+
+        ; Test 9: ESC c reset, ESC D/M/E and native FM-11 erase.
+        mov     dx,offset t9
+        call    puts
+        call    wait_key
+
+        mov     dx,offset finish
+        call    puts
+        mov     cl,0
+        int     BDOSINT
+
+; CP/M-86 BDOS function 9: output DS:DX, '$'-terminated.
+puts:
+        mov     cl,9
+        int     BDOSINT
+        ret
+
+; BDOS function 1: wait for one input character (echoed by CP/M).
+; Always place the question on row 24 for predictable tests.
+wait_key:
+        mov     dx,offset prompt
+        call    puts
+        mov     cl,1
+        int     BDOSINT
+        ret
+
+dseg
+org     100h
+
+intro   db      ESC,'[2J',ESC,'[H'
+        db      'FM-11 CP/M-86 ANSI/VT100 TEST',CR,LF,CR,LF
+        db      'Run with STAT CON:=CRT: or STAT CON:=UC1:',CR,LF
+        db      'Each page has an expected result to inspect.',CR,LF
+        db      'All output uses BDOS console, not direct hardware.',CR,LF
+        db      'A single key advances to the next page.','$'
+
+; Positions: ESC[H/f, ESC[G, ESC[d, ESC[A/B/C/D, ESC[E/F.
+t1      db      ESC,'[2J',ESC,'[H'
+        db      'TEST 1: CURSOR POSITION AND MOVEMENT',CR,LF
+        db      'Expected: ABC at row 5 col 10; X,Y,Z at row 8.',CR,LF
+        db      ESC,'[5;10H','ABC'
+        db      ESC,'[8;10H','X'
+        db      ESC,'[3C','Y'
+        db      ESC,'[2D','Z'
+        db      ESC,'[11;1H','Next: line E/F movement and G/d.'
+        db      ESC,'[12;20H','M'
+        db      ESC,'[2E','N'
+        db      ESC,'[1F','P'
+        db      ESC,'[20G','G'
+        db      ESC,'[15d','D'
+        db      '$'
+
+; Erase line: 0K cursor to end; 1K start through cursor; 2K whole line.
+t2      db      ESC,'[2J',ESC,'[H'
+        db      'TEST 2: ERASE LINE (K)',CR,LF
+        db      'Expected row 5: ABCDE; row 8: spaces + HIJ;',CR,LF
+        db      'row 11 blank (the entire row erased).',CR,LF
+        db      ESC,'[5;1H','ABCDEFGHIJ'
+        db      ESC,'[5;6H',ESC,'[0K'
+        db      ESC,'[8;1H','ABCDEFGHIJ'
+        db      ESC,'[8;7H',ESC,'[1K'
+        db      ESC,'[11;1H','ABCDEFGHIJ'
+        db      ESC,'[11;6H',ESC,'[2K'
+        db      '$'
+
+; Erase 3 chars at column 6, preserve the cursor to overwrite with X.
+t3      db      ESC,'[2J',ESC,'[H'
+        db      'TEST 3: ERASE CHARACTERS (X)',CR,LF
+        db      'Expected row 6: ABCDEX  IJ (F-G-H removed).',CR,LF
+        db      ESC,'[6;1H','ABCDEFGHIJ'
+        db      ESC,'[6;6H',ESC,'[3X','X'
+        db      '$'
+
+; For J0, rows below the cursor are removed.
+t4      db      ESC,'[2J',ESC,'[H'
+        db      'TEST 4: ERASE TO END OF DISPLAY (0J)',CR,LF
+        db      'Expected: KEEP-1 and KEEP; later rows erased.',CR,LF
+        db      ESC,'[5;1H','KEEP-1'
+        db      ESC,'[6;1H','KEEP-2-ERASE-REST'
+        db      ESC,'[8;1H','ERASE-ME-TOO'
+        db      ESC,'[6;5H',ESC,'[0J'
+        db      '$'
+
+; For J1, earlier rows disappear but later rows remain.
+t5      db      ESC,'[2J',ESC,'[H'
+        db      'TEST 5: ERASE FROM START OF DISPLAY (1J)',CR,LF
+        db      ESC,'[5;1H','REMOVE-THIS'
+        db      ESC,'[6;1H','REMOVE-ME-THROUGH-COL-6'
+        db      ESC,'[8;1H','KEEP-THIS-LINE'
+        db      ESC,'[6;7H',ESC,'[1J'
+        db      ESC,'[10;1H'
+        db      'Expected: rows 1-5 erased, row 6 starts with spaces,'
+        db      CR,LF,'row 8 still reads KEEP-THIS-LINE.'
+        db      '$'
+
+; CSI 2J must restore the cursor, unlike the native full clear.
+t6      db      ESC,'[2J',ESC,'[H'
+        db      'TEST 6: ERASE ENTIRE DISPLAY (2J)',CR,LF
+        db      ESC,'[5;10H',ESC,'[2J'
+        db      'PASS: this starts at row 5, column 10.'
+        db      '$'
+
+t7      db      ESC,'[2J',ESC,'[H'
+        db      'TEST 7: SGR COLORS AND ATTRIBUTES',CR,LF
+        db      'Expected: 8 basic colors, 8 bright colors.',CR,LF
+        db      ESC,'[30m','BLACK ',ESC,'[31m','RED '
+        db      ESC,'[32m','GREEN ',ESC,'[33m','YELLOW '
+        db      ESC,'[34m','BLUE ',ESC,'[35m','MAGENTA '
+        db      ESC,'[36m','CYAN ',ESC,'[37m','WHITE'
+        db      ESC,'[0m',CR,LF
+        db      ESC,'[90m','B-BLACK ',ESC,'[91m','B-RED '
+        db      ESC,'[92m','B-GREEN ',ESC,'[93m','B-YELLOW '
+        db      ESC,'[94m','B-BLUE ',ESC,'[95m','B-MAGENTA '
+        db      ESC,'[96m','B-CYAN ',ESC,'[97m','B-WHITE'
+        db      ESC,'[0m',CR,LF
+        db      ESC,'[1m','BOLD ',ESC,'[22m','NORMAL '
+        db      ESC,'[7m','REVERSE ',ESC,'[27m','NORMAL'
+        db      CR,LF
+        db      ESC,'[5m','BLINK ATTRIBUTE ',ESC,'[25m','OFF'
+        db      CR,LF
+        db      ESC,'[1;31m','BOLD RED',ESC,'[0m'
+        db      CR,LF
+        db      'Note: character blinking depends on renderer support.'
+        db      '$'
+
+t8      db      ESC,'[2J',ESC,'[H'
+        db      'TEST 8: SAVE AND RESTORE CURSOR',CR,LF
+        db      'Expected: A at (5,10), B at (7,20), C at (5,11);',CR,LF
+        db      'D at (10,10), E at (12,20), F at (10,11).',CR,LF
+        db      ESC,'[5;10H','A',ESC,'7'
+        db      ESC,'[7;20H','B',ESC,'8','C'
+        db      ESC,'[10;10H','D',ESC,'[s'
+        db      ESC,'[12;20H','E',ESC,'[u','F'
+        db      '$'
+
+t9      db      ESC,'[2J',ESC,'[H'
+        db      'TEST 9: VT100 RESET, INDEX AND NATIVE ERASE',CR,LF
+        db      'ESC c clears and homes:',CR,LF
+        db      ESC,'c','RESET/HOME'
+        db      ESC,'[3;5H','IDX'
+        db      ESC,'D','DOWN'
+        db      ESC,'M','UP'
+        db      ESC,'E','NEXT LINE'
+        db      ESC,'[10;1H','NATIVE ERASE-TO-EOL: REMOVE THIS'
+        db      ESC,'[10;20H',ESC,'T'
+        db      ESC,'[12;1H','Done: above text should end before col 20.'
+        db      '$'
+
+finish  db      ESC,'[0m',ESC,'[2J',ESC,'[H'
+        db      'ANSI/VT100 display tests complete.',CR,LF
+        db      'You may return to the CP/M-86 prompt.',CR,LF,'$'
+
+prompt  db      ESC,'[24;1H',ESC,'[0m'
+        db      'Press any key for next test... $'
+
+end
