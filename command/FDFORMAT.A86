@@ -270,12 +270,16 @@ up_done:
 ; Refuse cross-family installation: the resident INIT boot drive
 ; must match the physical FDC family used by its IPL.
 find_source:
-        ; Digital Research ASM86 1.1 rejects ES:[...] syntax.
-        ; Temporarily select the resident segment using DS and restore it.
+        ; ASM86 1.1 cannot use an absolute EQU as [displacement].
+        ; Select the resident segment, then use BX for the address.
+        ; Save DS and BX because both are needed by the caller.
         push    ds
+        push    bx
         mov     ax,BIOS_SEG
         mov     ds,ax
-        mov     al,Byte Ptr [BDOS_CURDRV]
+        mov     bx,BDOS_CURDRV
+        mov     al,[bx]
+        pop     bx
         pop     ds
         cmp     al,0
         jne     FDF_SKIP_028
