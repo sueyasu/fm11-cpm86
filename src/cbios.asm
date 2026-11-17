@@ -390,52 +390,54 @@ GETSEGT:
 
 ; Initialize CP/M-86 Memory Region Table for the installed FM-11 RAM.
 ;
-; The 8088 bus is 20-bit and mirrors addresses beyond the fitted RAM
-; (128 KiB increments) back into populated RAM.  Probe at the SAME
-; offset as a byte owned by this CBIOS in each successive 128 KiB bank:
-; 0400:anchor, 2400:anchor, 4400:anchor, ... E400:anchor.
-; The first mirror is the installed RAM boundary.  The anchor is set
-; to a known value, and both the remote probe byte and the original
-; anchor are restored before returning.  The remote addresses are all
-; in the TPA when populated and never overlap the resident image.
+; FM-11 emulator RAM mirrors at its installed-capacity boundary.  The
+; 8088 has a 20-bit physical address space and a ROM overlay at FF000h.
+; Probe every 8 KiB boundary from 64 KiB through 1016 KiB; all supported
+; RAM sizes are at least 128 KiB and divisible by 8 KiB.
 ;
-; Keep CS/DS invariant (INIT has DS=CS), preserve ES and all scratch
-; registers, and never access the 1 MiB ROM overlay while probing.
-; For 1024 KiB, none of the seven candidates aliases the anchor.
-; The top 4 KiB (physical FF000h..FFFFFh) is ROM, not CP/M TPA.
+; Use an anchor at physical 0000:0500, below the loaded CP/M resident,
+; rather than a late CBIOS variable: the highest probe at physical
+; FE500h must stay below the FF000h ROM overlay without 20-bit wrap.
+; Every candidate, starting at physical 10500h, lies in TPA RAM.
+; Save and restore the byte at both addresses even if the probe aliases
+; RAM, with DS/ES and all caller-visible registers preserved.
 ;
-; MRT entry is one region: start segment 0800h (physical 08000h),
-; length in paragraphs.  BDOS/CCP/CBIOS remain below 08000h.
+; MRT entry is one region beginning at segment 0800h (physical 08000h).
+; It ends at installed RAM's boundary, or FF000h for a full 1 MiB.
+RAM_PROBE_OFF equ 0x0500
 init_mrt:
     push ax
     push bx
     push cx
     push dx
+    push ds
     push es
-    mov al,[ram_probe_anchor]
-    mov byte [ram_probe_anchor],0x5a
-    mov bx,0x2400            ; first candidate: physical 24000h
-    mov cx,7                 ; 128,256,...,896 KiB boundaries
+    xor ax,ax
+    mov ds,ax               ; anchor is at physical 0000:0500
+    mov al,[RAM_PROBE_OFF]   ; save original anchor byte in AL
+    mov byte [RAM_PROBE_OFF],0x5a
+    mov bx,0x1000           ; first candidate: physical 10500h (64 KiB)
+    mov cx,120              ; 64,72,...,1016 KiB boundaries
 .probe:
     mov es,bx
-    mov dl,[es:ram_probe_anchor]
-    mov byte [es:ram_probe_anchor],0xa5
-    cmp byte [ram_probe_anchor],0xa5
-    mov [es:ram_probe_anchor],dl
+    mov dl,[es:RAM_PROBE_OFF]
+    mov byte [es:RAM_PROBE_OFF],0xa5
+    cmp byte [RAM_PROBE_OFF],0xa5
+    mov [es:RAM_PROBE_OFF],dl
     je .found
-    add bx,0x2000
+    add bx,0x0200           ; next 8 KiB block (512 paragraphs)
     loop .probe
-    ; Full 1 MiB: avoid the 4 KiB reset ROM overlay at FF000h.
-    mov word [mrt_tpa_len],0xf700  ; FF00h - 0800h
+    ; No alias through 1016 KiB: full 1 MiB, except the top 4 KiB ROM.
+    mov word [cs:mrt_tpa_len],0xf700
     jmp short .done
 .found:
-    ; Candidate segment = 0400h + installed RAM / 16.
-    ; TPA size in paragraphs = installed RAM / 16 - 0800h.
-    sub bx,0x0c00
-    mov [mrt_tpa_len],bx
+    ; BX holds the boundary in paragraphs.  TPA starts at 0800h.
+    sub bx,0x0800
+    mov [cs:mrt_tpa_len],bx
 .done:
-    mov [ram_probe_anchor],al
+    mov [RAM_PROBE_OFF],al
     pop es
+    pop ds
     pop dx
     pop cx
     pop bx
@@ -760,8 +762,6 @@ mrt:
     dw 0x0800
 mrt_tpa_len:
     dw 0x7800
-ram_probe_anchor:
-    db 0
 
 ; Pad the CBIOS itself (not the optional 0x2500-byte preceding core).
 times BIOS_SIZE - ($ - bios_start) db 0
