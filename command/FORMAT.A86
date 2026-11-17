@@ -1690,62 +1690,8 @@ msg_warning     db      'WARNING: all target files will be destroyed!',0dh,0ah
                 db      'Continue (Y/N)? $'
 msg_abort       db      0dh,0ah,'Aborted.',0dh,0ah,'$'
 msg_source_error db     'Cannot read current boot disk system resident.',0dh,0ah,'$'
-msg_patch_error db      'Unknown CBIOS INIT; target unchanged.',0dh,0ah,'msg_format      db      'Physical WRITE TRACK formatting...',0dh,0ah,'$'
-msg_install     db      'Installing IPL and clean resident image...',0dh,0ah,'$'
-msg_io_error    db      'Disk I/O or format failed at C/H/S= $'
-msg_done_data   db      'Data disk physical format complete.',0dh,0ah,'$'
-msg_done_system db      'Bootable system disk physical format complete.',0dh,0ah,'$'
-msg_done_low    db      'Physical format complete (/L).',0dh,0ah,'$'
-msg_hdd_options db      'HDD does not support /L physical format.',0dh,0ah,'$'
-msg_hdd_format  db      'Initializing HDD IPL area and CP/M directory...',0dh,0ah,'$'
-msg_hdd_install db      'Writing HDD IPL and CP/M-86 resident...',0dh,0ah,'$'
-msg_hdd_done    db      'HDD logical format complete (nonbootable).',0dh,0ah,'$'
-msg_hdd_system_done db   'Bootable HDD format complete.',0dh,0ah,'$'
-msg_hdd_error   db      'HDD I/O/verification failed; disk may be incomplete.',0dh,0ah,'$'
-
-INCLUDE FDIPL2D.INC
-INCLUDE FDIPL2HD.INC
-INCLUDE HDIPL.INC
-
-; 512 bytes ensure one 256-byte DMA buffer fits a physical 64-KiB page.
-sectorbuf       rs      512
-system_image    rs      03e00h
-; Two alternative 10,900-byte DMA regions; select one that stays
-; within a physical 64-KiB DMA page.
-track_area      rs      FMT_MAX+FMT_ALT
-local_stack     rs      1024
-local_stack_top db      0
-end
-
-
-msg_cache_error db      'CBIOS cache write-back failed; FORMAT aborted.',0dh,0ah,'msg_format      db      'Physical WRITE TRACK formatting...',0dh,0ah,'$'
-msg_install     db      'Installing IPL and clean resident image...',0dh,0ah,'$'
-msg_io_error    db      'Disk I/O or format failed at C/H/S= $'
-msg_done_data   db      'Data disk physical format complete.',0dh,0ah,'$'
-msg_done_system db      'Bootable system disk physical format complete.',0dh,0ah,'$'
-msg_done_low    db      'Physical format complete (/L).',0dh,0ah,'$'
-msg_hdd_options db      'HDD does not support /L physical format.',0dh,0ah,'$'
-msg_hdd_format  db      'Initializing HDD IPL area and CP/M directory...',0dh,0ah,'$'
-msg_hdd_install db      'Writing HDD IPL and CP/M-86 resident...',0dh,0ah,'$'
-msg_hdd_done    db      'HDD logical format complete (nonbootable).',0dh,0ah,'$'
-msg_hdd_system_done db   'Bootable HDD format complete.',0dh,0ah,'$'
-msg_hdd_error   db      'HDD I/O/verification failed; disk may be incomplete.',0dh,0ah,'$'
-
-INCLUDE FDIPL2D.INC
-INCLUDE FDIPL2HD.INC
-INCLUDE HDIPL.INC
-
-; 512 bytes ensure one 256-byte DMA buffer fits a physical 64-KiB page.
-sectorbuf       rs      512
-system_image    rs      03e00h
-; Two alternative 10,900-byte DMA regions; select one that stays
-; within a physical 64-KiB DMA page.
-track_area      rs      FMT_MAX+FMT_ALT
-local_stack     rs      1024
-local_stack_top db      0
-end
-
-
+msg_patch_error db      'Unknown CBIOS INIT; target unchanged.',0dh,0ah,'$'
+msg_cache_error db      'CBIOS cache write-back failed; FORMAT aborted.',0dh,0ah,'$'
 msg_format      db      'Physical WRITE TRACK formatting...',0dh,0ah,'$'
 msg_install     db      'Installing IPL and clean resident image...',0dh,0ah,'$'
 msg_io_error    db      'Disk I/O or format failed at C/H/S= $'
