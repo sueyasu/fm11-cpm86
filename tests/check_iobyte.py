@@ -25,6 +25,20 @@ for start, stop in (("CONST:", "CONIN:"), ("CONIN:", "CONOUT:"), ("CONOUT:", "LI
 
 conin = source.split("\nCONIN:\n", 1)[1].split("\nCONOUT:\n", 1)[0]
 assert "SER_RX_READY" in conin and "SER_DATA" in conin
+assert ".shared_wait:" in conin
+assert "call local_const" in conin
+assert "mov bl,al" in conin
+assert "cmp byte [uc1_next],0" in conin
+assert "mov byte [uc1_next],1" in conin
+assert "mov byte [uc1_next],0" in conin
+assert "call local_conin" in conin.split(".shared_local:",1)[1]
+assert "in al,dx" in conin.split(".serial_read:",1)[1]
+assert "uc1_next db 0" in source
+
+const = source.split("\\nCONST:\\n",1)[1].split("\\nCONIN:\\n",1)[0]
+assert ".shared:" in const
+assert "call local_const" in const.split(".shared:",1)[1]
+assert "SER_RX_READY" in const.split(".serial:",1)[1]
 assert "call local_conin" in conin
 conout = source.split("\nCONOUT:\n", 1)[1].split("\nLISTOUT:\n", 1)[0]
 assert "call local_putc" in conout
@@ -34,4 +48,4 @@ assert conout.index("call local_putc", conout.index(".mirror:")) < conout.index(
 assert "loop .wait" in source.split("\nserial_putc_mirror:\n", 1)[1].split("\nserial_puts:\n", 1)[0]
 assert '%include "src/cbios_local_console.inc"' in source
 assert source.count('%include "src/cbios_local_console.inc"') == 1
-print("PASS: runtime IOBYTE TTY/CRT/UC1 console routing and bounded mirror")
+print("PASS: runtime IOBYTE TTY/CRT/dual-input UC1 console routing and bounded mirror")
