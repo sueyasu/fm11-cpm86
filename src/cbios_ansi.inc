@@ -245,10 +245,14 @@ ansi_putc:
     call ansi_goto
     jmp .done
 .clear1:
-    mov byte [ansi_work_row],1
+    mov al,[ansi_row]
+    mov [ansi_work_row],al
+    mov al,[ansi_col]
+    mov [ansi_work_col],al
+    mov byte [ansi_iter],1
 .clear1loop:
-    mov al,[ansi_work_row]
-    cmp al,[ansi_row]
+    mov al,[ansi_iter]
+    cmp al,[ansi_work_row]
     jae .clear1current
     mov ah,1
     call ansi_goto
@@ -256,16 +260,16 @@ ansi_putc:
     call ansi_raw
     mov al,'T'
     call ansi_raw
-    inc byte [ansi_work_row]
+    inc byte [ansi_iter]
     jmp .clear1loop
 .clear1current:
-    mov al,[ansi_row]
+    mov al,[ansi_work_row]
     mov ah,1
     call ansi_goto
-    mov cl,[ansi_col]
+    mov cl,[ansi_work_col]
     call ansi_spaces
-    mov al,[ansi_row]
-    mov ah,[ansi_col]
+    mov al,[ansi_work_row]
+    mov ah,[ansi_work_col]
     call ansi_goto
     jmp .done
 .erase_line:
@@ -277,12 +281,15 @@ ansi_putc:
     call ansi_eol
     jmp .done
 .line_all:
+    mov al,[ansi_col]
+    mov [ansi_work_col],al
     mov al,[ansi_row]
     mov ah,1
     call ansi_goto
     call ansi_eol
     mov al,[ansi_row]
-    mov ah,[ansi_work_col]    ; overwritten below in .line_all fix
+    mov ah,[ansi_work_col]
+    call ansi_goto
     jmp .done
 .line_start:
     mov al,[ansi_col]
@@ -326,7 +333,7 @@ ansi_putc:
 
 ; Raw native output: no parser recursion.
 ansi_raw:
-    call local_putc
+    call local_native_putc
     ret
 
 ansi_count:
@@ -552,4 +559,5 @@ ansi_save_row db 1
 ansi_save_col db 1
 ansi_work_row db 1
 ansi_work_col db 1
+ansi_iter db 1
 ansi_attr db 7
