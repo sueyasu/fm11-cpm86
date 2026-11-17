@@ -138,7 +138,7 @@ INIT:
 %endif
 
 WBOOT:
-    mov byte [cache_valid],0 ; no dirty data: safe to discard
+    mov byte [cs:cache_valid],0 ; entry DS may not equal BIOS CS
     jmp 0x0006           ; provisional: disk reload not implemented
 
 CONST:
