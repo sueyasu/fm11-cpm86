@@ -79,6 +79,40 @@ MRT via a guest command that calls `GETSEGT` (and by executing
 programs above 512 KiB) before relying on the larger configurations
 on a real FM-11.
 
+## 8088 native screen and keyboard
+
+The FM-11 8088 card exposes the same display-subsystem I/O controls
+as the 6809 main card. `src/cbios_local_console.inc` implements the
+same HALT/mailbox transaction used by the NitrOS-9 `fm11console`
+driver and the CP/M-80 I/O server, translated to 8086 I/O instructions:
+
+1. Poll `IN AL,FD05h` until bit 7 clears (subsystem ready).
+2. `OUT FD05h,80h` to halt the display CPU; poll for bit 7 set.
+3. Set `FC80h=0, FC81h=0, FC82h=command, FC83h=parameter,
+   FC84h=0`.
+4. `OUT FD05h,00h` to resume the subsystem; poll for bit 7 clear.
+5. For `INKEY 2`, read `FC83h` (extended-status) and `FC84h`
+   (ASCII or extended keycode).
+
+The transaction always writes bit 0 of `FD05h` as zero, so it never
+requests an optional CPU-card bus-master switch. Each handshake
+has a bounded timeout. `CONST` caches characters for `CONIN`;
+arrow-key codes 0116h..0119h become ESC-[A..D and DEL 0114h is
+mapped to 7Fh. The display emits native FM-11 characters through
+subsystem command 12h. The BIOS keeps its 21-entry vector order,
+CBIOS 1900h-byte length and BOOT_DRIVE patch immediate position.
+
+Native local console is the default CBIOS build; `CONSOLE_LOCAL=0`
+at NASM assembly time selects the original serial path. The 2D and
+HDD reset ROMs also skip the optional serial-PTY input gate in the
+local build. `LISTOUT` and `PUNCH` continue using USART0.
+
+This is **native-character mode** rather than the more comprehensive
+NitrOS-9 ANSI/VT100 parser. The emulator's 8088 `Main8088Bus`
+routes `FC80h-FCFFh` to `MainBoard::displaySubsystem` and
+`FD05h` to the same subsystem control used by 6809. Live SDL
+screen/keyboard verification remains outstanding.
+
 ## FM-11 devices
 
 - Serial data/status: I/O ports FD06h and FD07h. The current emulator's
