@@ -55,6 +55,7 @@ cache_bit:
 cache_select:
     push ax
     push bx
+    push cx
     push dx
     xor si,si
 .search:
@@ -118,6 +119,7 @@ cache_select:
     stc
 .done:
     pop dx
+    pop cx
     pop bx
     pop ax
     ret
