@@ -8,7 +8,7 @@ CPM86_CORE ?= external/system/cpm86_core.bin
 # both image builders before a disk image is written.
 EXTERNAL_FILES := $(filter-out external/commands/README.md,$(sort $(wildcard external/commands/*)))
 
-.PHONY: all check-tools check-core bios rom diag cbios-diag boot boot-d88 boot-2hd fdformat-inc selftest check test clean
+.PHONY: all check-tools check-core bios rom diag cbios-diag boot boot-d88 boot-2hd boot-hdd fdformat-inc selftest check test clean
 all: bios rom check
 
 check-tools:
@@ -18,16 +18,16 @@ check-tools:
 $(BUILD):
 	mkdir -p $@
 
-$(BUILD)/cbios.bin: src/cbios.asm | $(BUILD)
+$(BUILD)/cbios.bin: src/cbios.asm src/cbios_hdd.inc | $(BUILD)
 	$(NASM) -f bin $< -o $@
 
 # The 2HD bootable image starts at logical E:, while the 2D image starts at A:.
-$(BUILD)/cbios_2hd.bin: src/cbios.asm | $(BUILD)
+$(BUILD)/cbios_2hd.bin: src/cbios.asm src/cbios_hdd.inc | $(BUILD)
 	$(NASM) -f bin -DBOOT_DRIVE=4 $< -o $@
 
 # Link the self-test into the CCP/BDOS-sized core region. Keep the
 # actual CBIOS at exactly 0x1900 bytes, preserving the normal IPL layout.
-$(BUILD)/cbios_selftest_resident.bin: src/cbios_selftest_resident.asm src/cbios.asm src/cbios_selftest.inc | $(BUILD)
+$(BUILD)/cbios_selftest_resident.bin: src/cbios_selftest_resident.asm src/cbios.asm src/cbios_hdd.inc src/cbios_selftest.inc | $(BUILD)
 	$(NASM) -f bin $< -o $@
 
 $(BUILD)/cbios_selftest_core.bin $(BUILD)/cbios_selftest.bin &: $(BUILD)/cbios_selftest_resident.bin tests/split_selftest_resident.py
@@ -84,6 +84,33 @@ boot-2hd: check-core $(BUILD)/fm11_cpm86_boot_2hd.d88
 	$(PYTHON) tests/check_boot_2hd.py $(BUILD)/ipl_2hd.bin $(BUILD)/cbios_2hd.bin \
 		$(BUILD)/fm11_cpm86_boot_2hd.raw $(BUILD)/fm11_cpm86_boot_2hd.d88
 
+
+# FM-11 MDC whole-HDD CP/M-86 I: (no partition table).
+# The reset ROM loads the on-disk 512-byte IPL, which loads the 0x3E00
+# resident image. Geometry defaults to M2233B; choose HDD_MODEL=m2243b etc.
+HDD_MODEL ?= m2233b
+
+$(BUILD)/cbios_hdd.bin: src/cbios.asm src/cbios_hdd.inc | $(BUILD)
+	$(NASM) -f bin -DBOOT_DRIVE=8 $< -o $@
+
+$(BUILD)/ipl_hdd.bin: src/ipl_hdd.asm src/hdd_boot_io.inc | $(BUILD)
+	$(NASM) -f bin $< -o $@
+
+$(BUILD)/hdd_bootrom.bin: src/hdd_bootrom.asm src/hdd_boot_io.inc | $(BUILD)
+	$(NASM) -f bin $< -o $@
+
+$(BUILD)/fm11_cpm86_boot_hdd.img: $(BUILD)/cbios_hdd.bin $(BUILD)/ipl_hdd.bin tests/build_boot_hdd.py tests/build_boot_2d.py $(CPM86_CORE) $(EXTERNAL_FILES) | $(BUILD)
+	$(PYTHON) tests/build_boot_hdd.py --model $(HDD_MODEL) \
+		--ipl $(BUILD)/ipl_hdd.bin --core $(CPM86_CORE) --cbios $(BUILD)/cbios_hdd.bin \
+		$(foreach f,$(EXTERNAL_FILES),--file $(f)) $@
+
+boot-hdd: check-core $(BUILD)/hdd_bootrom.bin $(BUILD)/fm11_cpm86_boot_hdd.img
+	$(PYTHON) tests/check_boot_hdd.py $(BUILD)/hdd_bootrom.bin $(BUILD)/ipl_hdd.bin $(BUILD)/cbios_hdd.bin $(BUILD)/fm11_cpm86_boot_hdd.img $(HDD_MODEL)
+
+$(BUILD)/test_hdd.img: $(BUILD)/test_2hd_core.bin $(BUILD)/cbios_hdd.bin $(BUILD)/ipl_hdd.bin tests/build_boot_hdd.py | $(BUILD)
+	$(PYTHON) tests/build_boot_hdd.py --model m2230b \
+		--ipl $(BUILD)/ipl_hdd.bin --core $(BUILD)/test_2hd_core.bin --cbios $(BUILD)/cbios_hdd.bin $@
+
 # Structural 2HD tests use a deliberately nonbootable synthetic CCP/BDOS.
 # No proprietary CP/M core is necessary to run "make test".
 $(BUILD)/test_2hd_core.bin: | $(BUILD)
@@ -127,10 +154,11 @@ diag: $(BUILD)/fdc2d_diag.bin
 check: $(BUILD)/cbios.bin $(BUILD)/bootrom.bin
 	$(PYTHON) tests/check_layout.py $(BUILD)/cbios.bin $(BUILD)/bootrom.bin
 
-test: check diag cbios-diag $(BUILD)/iplrom.bin $(BUILD)/test_2hd.d88 fdformat-inc
+test: check diag cbios-diag $(BUILD)/iplrom.bin $(BUILD)/test_2hd.d88 $(BUILD)/test_hdd.img $(BUILD)/hdd_bootrom.bin fdformat-inc
 	$(PYTHON) tests/check_boot_2hd.py $(BUILD)/ipl_2hd.bin $(BUILD)/cbios_2hd.bin \
 		$(BUILD)/test_2hd.raw $(BUILD)/test_2hd.d88
 	$(PYTHON) tests/check_fdformat_inc.py $(BUILD)/ipl_2d.bin $(BUILD)/ipl_2hd.bin command/FDIPL2D.INC command/FDIPL2HD.INC
+	$(PYTHON) tests/check_boot_hdd.py $(BUILD)/hdd_bootrom.bin $(BUILD)/ipl_hdd.bin $(BUILD)/cbios_hdd.bin $(BUILD)/test_hdd.img m2230b
 	$(PYTHON) tests/check_fdformat_source.py
 	$(PYTHON) tests/check_format_source.py
 	$(PYTHON) tests/check_fdformat_boot_patch.py $(BUILD)/cbios.bin $(BUILD)/cbios_2hd.bin
