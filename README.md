@@ -25,7 +25,7 @@ make test        # static / synthetic-disk tests; no CP/M core required
 ```
 
 Both boot targets require `external/system/cpm86_core.bin` (0x2500
-bytes) and include optional `external/commands/*.CMD` and `*.cmd`.
+bytes) and include optional CP/M 8.3 files from `external/commands/`.
 The new 2HD target produces:
 
 - `build/cbios_2hd.bin`: 0x1900-byte CBIOS with cold-start drive E:
@@ -40,8 +40,8 @@ C2/H0 (DPB OFF=4). 2HD uses 4-KiB allocation blocks and supports
 243 blocks total (DSM=242). This image is intended for the
 2HD FDD0, with `[DIPSW] 2HD_FDD = true` in the emulator configuration.
 
-The image-structure and CBIOS-build tests pass, but **end-to-end
-2HD CP/M-86 boot and file I/O still require emulator validation**.
+The generated 2HD CP/M-86 system has been booted successfully from
+physical 2HD FDD0 with current drive E:.
 
 See [the 2HD disk layout](docs/boot-2hd.md) for details.
 
@@ -53,12 +53,12 @@ and E:..H: (2HD units 0..3) by programming the FM-11 FDC and the
 include files, then assemble `FDFORMAT.A86` using ASM86 and GENCMD
 inside CP/M-86.
 
-**Current limitation:** The emulator does not implement physical
-WRITE TRACK formatting. The command reinitializes sectors that
-already exist and can install the same-family system IPL with
-`/S`. `/L` explicitly reports unsupported. A truly unformatted
-disk is not supported yet. Use disposable correctly formatted D88
-images for initial validation. See
+The formatter now issues real **WRITE TRACK (F0h)** commands to
+both FM-11 FDCs using 6,400-byte 2D and 10,900-byte 2HD track
+images. `/S` installs a matching IPL and resident image; `/L`
+performs only physical formatting. ASM86 and runtime validation of
+this revised command are still pending, so test only on disposable
+images first. See
 [command/README.md](command/README.md) for build instructions,
 disk layout, and safety restrictions.
 
@@ -250,17 +250,19 @@ bytes). Neither the proprietary core nor its binaries are committed.
 Provide the external core at `external/system/cpm86_core.bin`
 (or set `CPM86_CORE` in the make invocation).
 
-To include commands on the boot disk, put the CP/M-86 `.CMD` files in
-`external/commands/`, just as in the PC-98 port. Both lowercase
-`.cmd` and uppercase `.CMD` extensions are recognized. The builder
-imports each matching file into the CP/M directory with an uppercase
-8.3 filename. For example:
+To include any CP/M-compatible files on the boot disk, put the
+files in `external/commands/`. Both 2D and 2HD builders accept
+`.CMD`, `.A86`, `.INC`, `.TXT` and other 8.3 names. Files are
+stored byte-for-byte under uppercase CP/M names. For example:
 
 ```text
 external/commands/
   PIP.CMD
   STAT.CMD
   ED.CMD
+  FDFORMAT.A86
+  FDIPL2D.INC
+  FDIPL2HD.INC
 ```
 
 The image uses the CBIOS 2D DPB: 2 KiB allocation blocks,
