@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
-"""Check FM-11 CP/M-86 physical RAM probing and MRT size calculation.
+"""Static and model checks for FM-11 CP/M-86 8 KiB RAM probing.
 
-The RAM model matches the configurable FM-11 8088 bus: a fixed 20-bit
-address space, with each non-existent RAM address mirrored modulo the
-installed RAM capacity.  The reset ROM is mapped at physical FF000h.
-This is a deterministic model/static regression, NOT an emulator boot.
+The model follows the emulator's 20-bit bus: missing RAM mirrors
+modulo installed RAM bytes, while the last 4 KiB is read-only ROM.
+The tests verify byte restoration and every 8 KiB capacity from
+128 KiB through 1 MiB. They do not execute CBIOS instructions.
 """
 from pathlib import Path
 import sys
@@ -14,81 +14,87 @@ init = source.split("\nINIT:\n", 1)[1].split("\nWBOOT:\n", 1)[0]
 assert "call init_mrt" in init
 assert init.index("call init_mrt") < init.index("jmp 0x0000")
 section = source.split("\ninit_mrt:\n", 1)[1].split("\nGETIOBF:\n", 1)[0]
-assert "mov bx,0x2400" in section
-assert "mov cx,7" in section
-assert "add bx,0x2000" in section
-assert "loop .probe" in section
-assert "mov byte [ram_probe_anchor],0x5a" in section
-assert "mov byte [es:ram_probe_anchor],0xa5" in section
-assert "mov dl,[es:ram_probe_anchor]" in section
-assert "mov [es:ram_probe_anchor],dl" in section
-assert "mov al,[ram_probe_anchor]" in section
-assert "mov [ram_probe_anchor],al" in section
-assert "mov word [mrt_tpa_len],0xf700" in section
-assert "sub bx,0x0c00" in section
-assert "mov [mrt_tpa_len],bx" in section
-assert source.index("mrt_tpa_len:") < source.index("ram_probe_anchor:")
+for instruction in (
+    "RAM_PROBE_OFF equ 0x0500",
+    "push ds",
+    "push es",
+    "xor ax,ax",
+    "mov ds,ax",
+    "mov al,[RAM_PROBE_OFF]",
+    "mov byte [RAM_PROBE_OFF],0x5a",
+    "mov bx,0x1000",
+    "mov cx,120",
+    "mov dl,[es:RAM_PROBE_OFF]",
+    "mov byte [es:RAM_PROBE_OFF],0xa5",
+    "cmp byte [RAM_PROBE_OFF],0xa5",
+    "mov [es:RAM_PROBE_OFF],dl",
+    "add bx,0x0200",
+    "loop .probe",
+    "mov word [cs:mrt_tpa_len],0xf700",
+    "sub bx,0x0800",
+    "mov [cs:mrt_tpa_len],bx",
+    "mov [RAM_PROBE_OFF],al",
+    "pop es",
+    "pop ds",
+):
+    if instruction not in source and instruction != "RAM_PROBE_OFF equ 0x0500":
+        assert instruction in section, f"missing RAM probe instruction: {instruction}"
+    else:
+        assert instruction in source, f"missing RAM probe definition: {instruction}"
+assert "ram_probe_anchor:" not in source
 assert "dw 0x0800\nmrt_tpa_len:\n    dw 0x7800" in source
 
-# Use the BIOS resident region as the exact logical offset being tested.
-# A candidate is physical 04000h+offset+n*20000h.
-ANCHOR_OFFSET = 0x3900
-ANCHOR_PHYS = 0x4000 + ANCHOR_OFFSET
-ROM_BASE = 0xFF000
+ANCHOR_PHYS = 0x0500
+ROM_START = 0xFF000
+FIRST_KIB = 64
+PROBE_COUNT = 120
+assert ANCHOR_PHYS + FIRST_KIB * 1024 == 0x10500
+assert ANCHOR_PHYS + (FIRST_KIB + (PROBE_COUNT - 1) * 8) * 1024 == 0xFE500
+assert 0xFE500 < ROM_START
 
 
 def simulate(kib):
-    ram = bytearray(kib * 1024)
-    # Start with an arbitrary anchor value and nonuniform scratch values.
-    for i in range(len(ram)):
-        if i % 0x1000 == 0x900:
-            ram[i] = (i >> 12) & 255
-    original = ram[:]
+    capacity = kib * 1024
+    ram = bytearray(capacity)
+    # Initialize anchor and each candidate to different bytes,
+    # including targets that wrap into earlier installed RAM.
+    for physical in range(ANCHOR_PHYS, ROM_START, 0x2000):
+        ram[physical % capacity] = (physical >> 13) & 0xFF
+    before = ram[:]
+
     previous = ram[ANCHOR_PHYS]
     ram[ANCHOR_PHYS] = 0x5A
-    found = None
-    for number in range(1, 8):
-        candidate_phys = ANCHOR_PHYS + number * 0x20000
-        assert candidate_phys < ROM_BASE
-        target = candidate_phys % len(ram)
-        old = ram[target]
+    found_kib = None
+
+    for candidate_kib in range(FIRST_KIB, 1024, 8):
+        candidate_phys = ANCHOR_PHYS + candidate_kib * 1024
+        assert candidate_phys < ROM_START
+        target = candidate_phys % capacity
+        saved = ram[target]
         ram[target] = 0xA5
-        aliased = ram[ANCHOR_PHYS] == 0xA5
-        ram[target] = old
-        if aliased:
-            found = number
+        alias = ram[ANCHOR_PHYS] == 0xA5
+        ram[target] = saved
+        if alias:
+            found_kib = candidate_kib
             break
+
     ram[ANCHOR_PHYS] = previous
-    assert ram == original, f"{kib} KiB: RAM contents changed after probe"
-    detected_kib = found * 128 if found is not None else 1024
-    tpa_start = 0x0800
-    tpa_end = (detected_kib * 1024) // 16
-    if detected_kib == 1024:
-        tpa_end = 0xFF00  # upper 4 KiB read-only boot ROM
-    return detected_kib, tpa_start, tpa_end - tpa_start
+    assert ram == before, f"{kib} KiB: probe changed RAM contents"
+    detected_kib = found_kib if found_kib is not None else 1024
+    tpa_end = min(detected_kib * 1024, ROM_START) // 16
+    return detected_kib, 0x0800, tpa_end - 0x0800
 
 
-expected = {
-    128: 0x1800,
-    256: 0x3800,
-    384: 0x5800,
-    512: 0x7800,
-    640: 0x9800,
-    768: 0xB800,
-    896: 0xD800,
-    1024: 0xF700,
-}
-for kib, paragraphs in expected.items():
+for kib in range(128, 1025, 8):
     detected, start, length = simulate(kib)
-    assert (detected, start, length) == (kib, 0x0800, paragraphs), (
-        kib, detected, start, hex(length)
+    expected = min(kib * 1024, ROM_START) // 16 - 0x0800
+    assert (detected, start, length) == (kib, 0x0800, expected), (
+        f"{kib} KiB: detected={detected}, MRT=({start:#x},{length:#x}), "
+        f"expected length {expected:#x}"
     )
 
 if len(sys.argv) > 1:
     data = Path(sys.argv[1]).read_bytes()
-    assert len(data) == 0x1900
-    # Default in-memory table image is 1 region, segment 0800h, 7800h
-    # paragraphs (512 KiB fallback, overwritten during INIT).
-    default_table = bytes.fromhex("01 00 08 00 78 00")
-    assert default_table in data, "missing initial MRT entry"
-print("PASS: RAM alias probe is restorable, and MRT covers all eight RAM sizes")
+    assert len(data) == 0x1900, f"unexpected CBIOS size {len(data):#x}"
+    assert bytes.fromhex("01 00 08 00 78 00") in data, "missing initial MRT entry"
+print("PASS: 113 RAM capacities (128..1024 KiB, 8 KiB increments), safe ROM bounds, restored RAM and MRT")
