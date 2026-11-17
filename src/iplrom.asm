@@ -2,7 +2,10 @@
 ; Dedicated raw 2D media, C0/H0/S1 onward, 62 x 256-byte sectors.
 ; Resident image = 0x2500-byte external core + 0x1900-byte FM-11 CBIOS.
 ; Loaded at 0400:0000, BIOS INIT entry at 0400:2500.
-; First stage waits for one serial byte so SDL PTY users can attach.
+; Serial builds can wait for PTY attachment; local builds boot immediately.
+%ifndef CONSOLE_LOCAL
+%define CONSOLE_LOCAL 1
+%endif
 cpu 8086
 bits 16
 org 0
@@ -40,8 +43,8 @@ entry:
     mov al,0x37
     out dx,al
 
-    ; PTY connection gate for early bring-up. No output is emitted before
-    ; a user has attached to the PTY and sent one character.
+%if CONSOLE_LOCAL = 0
+    ; Optional serial-only PTY connection gate.
 .wait_key:
     mov dx,SER_STATUS
     in al,dx
@@ -49,6 +52,7 @@ entry:
     jz .wait_key
     mov dx,SER_DATA
     in al,dx
+%endif
     mov si,msg_start
     call puts
 
