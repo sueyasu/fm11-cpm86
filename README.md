@@ -4,6 +4,51 @@ This project is an initial port of CP/M-86 to the Fujitsu FM-11's 8088
 main CPU card (or NEC V20 replacement). A first-stage 2D IPL ROM and
 image builder are available. **The 2D boot to the A> prompt and empty DIR\nhave been verified in the emulator.**
 
+## Native FM-11 local console (8088)
+
+The normal CP/M-86 BIOS now sends `CONOUT` to the FM-11 display
+subsystem and accepts the machine keyboard through `CONST`/`CONIN`.
+It uses the shared `FC80h` command area and the `FD05h` sub-CPU
+HALT/READY handshake already used by FM-11 NitrOS-9 and CP/M-80.
+
+- `CHARACTER OUT` (subsystem function `12h`) displays native FM-11
+  text and control characters on the 80x25 local screen.
+- `INKEY 2` (subsystem function `2Dh`) supplies keyboard input.
+  Cursor keys become ANSI `ESC [ A/B/C/D`, DEL becomes ASCII `7Fh`.
+  `CONST` caches the next available character, preserving it for `CONIN`.
+- `LISTOUT` and `PUNCH` still output to USART0; `READER` follows
+  `CONIN`.
+- Both 2D and HDD reset ROMs start without requiring a serial PTY
+  connection in the normal **local** build. The ROM may still emit
+  optional serial diagnostics.
+
+Build the local-console image normally:
+
+```sh
+make test
+make boot       # A: raw 2D image and 8088 reset ROM; requires CP/M core
+# Or: make boot-d88 / make boot-2hd / make boot-hdd
+```
+
+For the original serial-console environment, rebuild from clean
+sources with the same compile-time switch for the BIOS and ROM:
+
+```sh
+make clean
+make NASM='nasm -DCONSOLE_LOCAL=0' boot
+```
+
+The serial 2D reset ROM waits for a character on the PTY as before.
+`make test` also builds separate `cbios_serial.bin`,
+`iplrom_serial.bin`, and `hdd_bootrom_serial.bin` images.
+
+**Current scope:** local character output, common native control bytes
+(CR/LF/home/clear), ASCII, delete and cursor-key input. Full
+ANSI/VT100 output-sequence translation (as implemented in the
+NitrOS-9 local console) is not yet ported. GitHub CI tests assembly,
+image layout and the protocol statically; an actual 8088 emulator
+boot and keyboard/display test must still be performed.
+
 ## Fixed drive mapping and native 2HD boot
 
 The CBIOS uses a fixed eight-drive map, independent of the boot device:
@@ -351,18 +396,19 @@ fm11-sdl --main-rom /path/to/boot6809.bin \\
   --floppy2d build/fm11_cpm86_2d.img --floppy-drive 0
 ```
 
-As with the diagnostics, connect to the announced `Serial PTY:`
-with `screen /dev/pts/N` and press any key to start the ROM.
-A successful *loader* should emit:
+The default local-console reset ROM starts immediately without a
+`screen /dev/pts/N` connection. Its optional serial debug messages
+during the *loader* stage are:
 
 ```text
 FM-11 CP/M-86 2D IPL: loading resident
 FM-11 CP/M-86 IPL: CBIOS vector OK, entering INIT
-FM-11 CP/M-86 BIOS: serial initialized
+(CBIOS greeting appears on the local FM-11 screen instead)
 ```
 
-The IPL, CBIOS INIT, CCP prompt and empty-directory `DIR` have been
-confirmed in the FM-11 emulator. The new command-populated image still
+The earlier serial-console IPL, CBIOS INIT, CCP prompt and empty
+directory `DIR` were confirmed in the FM-11 emulator. The new
+local-console path still needs an interactive runtime test. The new command-populated image still
 requires live verification with `DIR`, `STAT`, `PIP` and executable
 `.CMD` files. `WBOOT`, runtime verification of dynamic RAM sizing, and
 more complex file operations also require testing. Avoid using valuable media: this is
