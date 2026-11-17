@@ -45,6 +45,29 @@ physical 2HD FDD0 with current drive E:.
 
 See [the 2HD disk layout](docs/boot-2hd.md) for details.
 
+## Whole-HDD CP/M-86 boot (I:, experimental)
+
+CBIOS now has a ninth DPH for the single physical FM-11 MDC hard
+disk. I: addresses the **whole raw HDD**, not a partition. Controller
+SENSE dynamically selects 16-KiB-block DPB values for all nine
+supported M223x/M224x geometries; LBA reads and writes use DMA2.
+
+The companion `hdd_bootrom.bin` loads the two-sector `ipl_hdd.bin`,
+which loads the 0x3E00-byte CP/M-86 resident with cold-start drive I:.
+HDD cylinder 0 is reserved for IPL and system sectors, and CP/M
+directory/data begin in cylinder 1.
+
+```bash
+make test
+make boot-hdd HDD_MODEL=m2233b
+# Optional: HDD_MODEL=m2243b (largest 64.20 MiB model)
+```
+
+See [HDD boot implementation and layout](docs/boot-hdd.md).
+The CBIOS and boot image are assembled/tested in CI, but actual
+8088 emulator boot and I: data I/O still need runtime verification.
+The unified FORMAT /S HDD support remains separate work.
+
 ## FM-11 CP/M-86 floppy initialization command (experimental)
 
 The `command/FDFORMAT.A86` source handles A:..D: (2D units 0..3)
