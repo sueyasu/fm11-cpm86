@@ -56,11 +56,28 @@ Outputs:
 - `build/cbios_hdd.bin` – 0x1900-byte CBIOS booting on I:
 - `build/fm11_cpm86_boot_hdd.img` – whole-HDD raw image
 
-Use the FM-11 SDL emulator 8088 CPU configuration with that boot ROM
-and assign the raw HDD image to the single MDC hard drive in the
-emulator configuration. The ROM waits for one serial key input before
-loading the HDD IPL, matching the development-time FDD boot ROM
-workflow.
+In the FM-11 emulator use the **8088 main CPU** configuration.
+In its `fm11emu.conf` (or a dedicated `--config` file), assign the
+single raw HDD image:
+
+```ini
+[hdd]
+image = /absolute/path/to/fm11_cpm86_boot_hdd.img
+```
+
+Start the emulator with the appropriate display/ANK ROM settings
+from your existing working 8088 configuration, overriding only its
+8088 CPU boot ROM:
+
+```sh
+fm11-sdl --config /path/to/fm11emu.conf \
+  --8088-rom /path/to/fm11-cpm86/build/hdd_bootrom.bin
+```
+
+After connecting a terminal to the serial PTY, send a character
+to release the ROM's serial attach gate. It then reads the HDD IPL.
+The IPL boots CP/M-86 with initial drive `I:` (drive number 8).
+Do not mount this HDD image concurrently elsewhere.
 
 `make hddipl-inc` creates `command/HDIPL.INC` from the identical IPL
 binary for the later unified FORMAT /S command. Existing FDFORMAT
