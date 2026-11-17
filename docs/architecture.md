@@ -55,14 +55,14 @@ CCP/BDOS/CBIOS and stack are below this boundary.
 
 | Installed RAM | TPA region segment | Length (paragraphs) | TPA size |
 | --- | --- | --- | --- |
-| 128 KiB | 0800h | 1800h | 96 KiB |
-| 256 KiB | 0800h | 3800h | 224 KiB |
-| 384 KiB | 0800h | 5800h | 352 KiB |
-| 512 KiB | 0800h | 7800h | 480 KiB |
-| 640 KiB | 0800h | 9800h | 608 KiB |
-| 768 KiB | 0800h | B800h | 736 KiB |
-| 896 KiB | 0800h | D800h | 864 KiB |
-| 1024 KiB | 0800h | F700h | 988 KiB |
+| 128 KiB | 0800h | 1400h | 80 KiB |
+| 256 KiB | 0800h | 3400h | 208 KiB |
+| 384 KiB | 0800h | 5400h | 336 KiB |
+| 512 KiB | 0800h | 7400h | 464 KiB |
+| 640 KiB | 0800h | 9400h | 592 KiB |
+| 768 KiB | 0800h | B400h | 720 KiB |
+| 896 KiB | 0800h | D400h | 848 KiB |
+| 1024 KiB | 0800h | F300h | 972 KiB |
 
 At 1024 KiB, the upper physical FF000h-FFFFFh is overlaid by the
 8088 reset ROM.  Thus the MRT stops at segment FF00h instead of
@@ -150,30 +150,57 @@ DH=head, CL=physical-sector (1-based); CF reports success/failure.
 The implementation checks DMA terminal count and FDC completion status,
 and masks CH0 on return. DMA CH0 is owned exclusively during the call.
 
-**Logical I/O:** CP/M-86 `READ` and `WRITE` now use 128-byte
-records, numbering 0..31 on each logical side-track (0..79).  The
-logical-to-physical mapping is cylinder = track / 2, head = track % 2,
-sector = record / 2 + 1, half-sector = record % 2.  A read transfers
-the selected half of `fdc2d_buffer` to the caller's DMA segment:offset.
-A physical-sector miss reads a complete 256-byte sector into
-`fdc2d_buffer`. The cache key consists of drive, logical side-track and
-0-based physical-sector index, shared across 2D/2HD/HDD.
-A hit on either logical 128-byte half reuses the buffer without another
-physical READ. A WRITE replaces only the selected half and **always**
-issues a complete 256-byte physical WRITE (write-through), retaining
-the other half. A failed WRITE invalidates the cache; a failed READ never
-publishes a valid key. A first-login SELDSK (DL bit 0 clear), INIT and
-WBOOT invalidate it as well. This is a one-sector global cache, not
-yet a per-drive track cache; it never holds dirty data and needs no flush.
+**Logical I/O and track write-back cache:** CP/M-86 `READ`/`WRITE`
+use 128-byte records (2D: 32 per logical side-track; 2HD: 52;
+HDD: 64). The physical sector is `record / 2` and the half-sector
+offset is `(record & 1) * 128`. The physical transport remains
+unchanged: `fdc2d_read/write` and `hdd_read/write` issue 256-byte
+DMA operations via the resident `fdc2d_buffer`.
 
-The common deblocking/transport layer lives in `src/cbios_sector_cache.inc`;
-`fdc2d_read/write` and `hdd_read/write` remain the physical transport.
-The dedicated CBIOS self-test checks paired record READ hits, zero
-extra physical READs on a cached WRITE, one physical WRITE on commit,
-re-login invalidation and original-data restoration.  `make test`
-checks static invariants and the image/CBIOS layout; the guest self-test
-must still be run on a disposable disk to validate real FDC traffic.
-Both logical operations return AX=0 on success and AX=1 on error.
+`src/cbios_track_cache.inc` implements **two shared 8 KiB windows**.
+Each window holds one logical side/head-track, identified by CP/M drive
+and track. Per-window **32-bit valid and dirty bitmaps** track physical
+sectors individually; only accessed sectors are loaded, and only dirty
+sectors are written on flush. The windows are allocated at the top of
+the detected RAM and removed from the MRT TPA during `INIT`.
+Thus 128 KiB RAM has **80 KiB TPA** instead of 96 KiB, and 1 MiB
+(with the 4 KiB ROM overlay) has **972 KiB TPA** instead of 988 KiB.
+Two windows let PIP alternate between source and destination tracks
+without replacing either window.
+
+**Write-back / consistency policy:** Every logical WRITE updates its
+128-byte half inside the resident track window and marks that physical
+sector dirty; a normal WRITE does not immediately access the disk.
+Dirty sectors are written when a window is evicted, on `WBOOT`, on
+first-login `SELDSK` (after which windows are invalidated), and on
+**directory WRITE (`CL=1`)**. Before a directory WRITE, pending file
+data on both windows is flushed; then the modified directory record is
+written and the resulting dirty sector is flushed before reporting
+success. This ordering avoids persisting a new directory entry before
+its data blocks. Failed physical writes retain the dirty bitmap, prevent
+unsafe eviction, and return an I/O error. The provisional WBOOT path
+halts on a failed flush rather than discarding data. The special
+WRITE type `CL=2` (first record of unallocated block) still reads the
+256-byte physical sector before modifying it, so its other half
+remains intact.
+
+**Important:** CP/M-86 v1.1 does not have a separate general-purpose
+BIOS flush entry; directory WRITE, eviction and WBOOT provide the
+flush points. An application that writes data without committing the
+directory, exits without WBOOT, and then removes media can still lose
+dirty data. Utilities that bypass CBIOS disk I/O (e.g. direct FORMAT)
+must first flush/invalidate the cache; the standard BIOS cannot detect
+arbitrary out-of-band FDC writes or unsignaled media changes. Therefore
+hot-swap and direct-controller formatting are not yet cache-coherent.
+No cache is installed in the emulator: the guest track cache is usable
+on actual FM-11 hardware.
+
+`make test` checks the source invariants and fixed CBIOS image layout;
+the optional CBIOS self-test additionally checks two-window retention,
+paired 128-byte cache hits, delayed physical WRITE counts, flush and
+on-disk restoration on a disposable image. The hardware/emulator
+integration path still requires guest execution. `READ` and `WRITE`
+return AX=0 on success and AX=1 on error.
 
 **2HD implementation:** Standard-FDC drives 0..3 use DMA channel 1,
 FD30h..FD35h, 26 physical sectors per side-track and 52 CP/M records.
@@ -184,13 +211,12 @@ The 2HD boot image has 26x128-byte FM records on C0/H0, a 512-byte
 IPL, and 62x256-byte resident sectors from C0/H1 onward. The 2HD
 CBIOS variant starts the CCP on E: rather than A:.
 
-**Limitations:** Full emulator-level runtime validation of CP/M-86
-2HD boot and all eight drives is still outstanding.  A record WRITE always performs a physical WRITE but a preceding
-physical READ is avoided when its sector is cached. No retry, automatic
-media-change detection, or real-hardware timing validation is implemented.  The bounce buffer
-is checked against the 8237 64 KiB page boundary, and the caller DMA
-offset is checked for 128-byte segment wrapping.  An IPL must
-establish the final resident segment and validate memory ownership.
+**Limitations:** Full emulator runtime verification of all nine drives
+and real hardware still needs to be performed. The track cache does not
+provide automatic media-change detection or coordination with direct
+controller access, and only two tracks are resident at once. The DMA
+bounce buffer is checked against 8237 64 KiB page boundaries, and the
+caller DMA offset is checked for 128-byte wrapping.
 
 The 2D IPL first-stage ROM and image generator are present. Next verify
 actual cold boot through INIT, the CCP/BDOS core, and filesystem access,
