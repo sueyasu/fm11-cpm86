@@ -25,15 +25,21 @@ not yet verified.
 
 ## Cold-boot RAM detection and CP/M-86 Memory Region Table
 
-CBIOS `INIT` calls `init_mrt` before entering CCP.  With the FM-11
+CBIOS `INIT` calls `init_mrt` before entering CCP. With the FM-11
 emulator's configurable RAM address decoder, memory not populated above
 the installed capacity aliases RAM at the beginning of the address
-space.  The routine tests physical 128 KiB boundaries (128 through
-896 KiB) by writing a marker at the *same offset* as a private CBIOS
-anchor.  It saves and restores **both** the candidate byte and anchor,
-avoiding permanent modifications to any populated RAM.  The CBIOS
-uses segment 0400h, so the anchor and every candidate remain within
-20-bit physical RAM, outside the 8088 boot ROM window.
+space. The routine checks **8 KiB boundaries** from 64 KiB through
+1016 KiB, supporting all installed capacities from 128 KiB to 1 MiB
+that are multiples of 8 KiB (including 192 KiB).
+
+The probe uses a saved byte at physical `0000:0500` and a matching
+offset in each candidate 8 KiB window (first `1000:0500`, last
+`FE00:0500`). These addresses avoid both the resident CP/M system
+(physical 04000h-07FFFh) and the reset ROM (physical FF000h-FFFFFh).
+Both the probe candidate byte and the anchor byte are restored before
+returning, even on alias detection; DS/ES are also restored. The
+probe assumes at least 128 KiB installed, matching supported FM-11
+emulator configurations.
 
 `GETSEGT` still returns a pointer in BX to the existing one-entry
 Memory Region Table (MRT).  `INIT` updates only its length; the region
@@ -53,7 +59,7 @@ CCP/BDOS/CBIOS and stack are below this boundary.
 
 At 1024 KiB, the upper physical FF000h-FFFFFh is overlaid by the
 8088 reset ROM.  Thus the MRT stops at segment FF00h instead of
-extending to the 1 MiB address-space boundary.  The all-size check is
+extending to the 1 MiB address-space boundary.  The all-113-capacity check is
 `python3 tests/check_ram_mrt.py build/cbios.bin` (also run by
 `make test`).
 
