@@ -35,7 +35,7 @@ assert "call local_conin" in conin.split(".shared_local:",1)[1]
 assert "in al,dx" in conin.split(".serial_read:",1)[1]
 assert "uc1_next db 0" in source
 
-const = source.split("\\nCONST:\\n",1)[1].split("\\nCONIN:\\n",1)[0]
+const = source.split("\nCONST:\n",1)[1].split("\nCONIN:\n",1)[0]
 assert ".shared:" in const
 assert "call local_const" in const.split(".shared:",1)[1]
 assert "SER_RX_READY" in const.split(".serial:",1)[1]
