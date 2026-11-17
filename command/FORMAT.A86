@@ -20,6 +20,7 @@
 ;
 BDOSINT        equ     0e0h
 BIOS_SEG       equ     0400h
+CACHE_RESET_OFS equ     03ddch ; identical to PC-9801 private CBIOS ABI
 BDOS_CURDRV    equ     024b7h
 MODE_DATA      equ     0
 MODE_SYSTEM    equ     1
@@ -94,6 +95,12 @@ FDF_SKIP_003:
         jmp     exit_program
 confirmed:
         call    crlf
+        ; All subsequent I/O may bypass CBIOS. Commit and invalidate
+        ; both track-cache windows before touching source or target.
+        call    bios_cache_reset
+        jnc     fmt_cache_ready
+        jmp     cache_reset_failed
+fmt_cache_ready:
         ; Save a clean source resident before modifying target media.
         ; Read system resident from the current boot disk (A:, E: or
         ; I:), before overwriting the target. Never snapshot live RAM.
@@ -211,6 +218,12 @@ io_failed:
         mov     al,Byte Ptr io_sector
         call    hex8
         call    crlf
+
+cache_reset_failed:
+        mov     dx,offset msg_cache_error
+        call    puts
+        ; No direct disk I/O has started; do not reset BDOS state.
+        jmp     exit_program
 
 reset_exit:
         ; Force BDOS to discard directory/allocation state changed
@@ -1574,6 +1587,15 @@ hdd_io_exit:
         pop     ax
         ret
 
+; PC-9801-compatible CBIOS private FAR CALL: 0400:3DDCh.
+; Opcode 9Ah avoids assembler-specific far-call syntax. CF from
+; CACHE_RESET is forwarded to the caller unchanged.
+bios_cache_reset:
+        DB      09Ah
+        DW      CACHE_RESET_OFS
+        DW      BIOS_SEG
+        ret
+
 puts:
         mov     cl,9
         int     BDOSINT
@@ -1668,7 +1690,62 @@ msg_warning     db      'WARNING: all target files will be destroyed!',0dh,0ah
                 db      'Continue (Y/N)? $'
 msg_abort       db      0dh,0ah,'Aborted.',0dh,0ah,'$'
 msg_source_error db     'Cannot read current boot disk system resident.',0dh,0ah,'$'
-msg_patch_error db      'Unknown CBIOS INIT; target unchanged.',0dh,0ah,'$'
+msg_patch_error db      'Unknown CBIOS INIT; target unchanged.',0dh,0ah,'msg_format      db      'Physical WRITE TRACK formatting...',0dh,0ah,'$'
+msg_install     db      'Installing IPL and clean resident image...',0dh,0ah,'$'
+msg_io_error    db      'Disk I/O or format failed at C/H/S= $'
+msg_done_data   db      'Data disk physical format complete.',0dh,0ah,'$'
+msg_done_system db      'Bootable system disk physical format complete.',0dh,0ah,'$'
+msg_done_low    db      'Physical format complete (/L).',0dh,0ah,'$'
+msg_hdd_options db      'HDD does not support /L physical format.',0dh,0ah,'$'
+msg_hdd_format  db      'Initializing HDD IPL area and CP/M directory...',0dh,0ah,'$'
+msg_hdd_install db      'Writing HDD IPL and CP/M-86 resident...',0dh,0ah,'$'
+msg_hdd_done    db      'HDD logical format complete (nonbootable).',0dh,0ah,'$'
+msg_hdd_system_done db   'Bootable HDD format complete.',0dh,0ah,'$'
+msg_hdd_error   db      'HDD I/O/verification failed; disk may be incomplete.',0dh,0ah,'$'
+
+INCLUDE FDIPL2D.INC
+INCLUDE FDIPL2HD.INC
+INCLUDE HDIPL.INC
+
+; 512 bytes ensure one 256-byte DMA buffer fits a physical 64-KiB page.
+sectorbuf       rs      512
+system_image    rs      03e00h
+; Two alternative 10,900-byte DMA regions; select one that stays
+; within a physical 64-KiB DMA page.
+track_area      rs      FMT_MAX+FMT_ALT
+local_stack     rs      1024
+local_stack_top db      0
+end
+
+
+msg_cache_error db      'CBIOS cache write-back failed; FORMAT aborted.',0dh,0ah,'msg_format      db      'Physical WRITE TRACK formatting...',0dh,0ah,'$'
+msg_install     db      'Installing IPL and clean resident image...',0dh,0ah,'$'
+msg_io_error    db      'Disk I/O or format failed at C/H/S= $'
+msg_done_data   db      'Data disk physical format complete.',0dh,0ah,'$'
+msg_done_system db      'Bootable system disk physical format complete.',0dh,0ah,'$'
+msg_done_low    db      'Physical format complete (/L).',0dh,0ah,'$'
+msg_hdd_options db      'HDD does not support /L physical format.',0dh,0ah,'$'
+msg_hdd_format  db      'Initializing HDD IPL area and CP/M directory...',0dh,0ah,'$'
+msg_hdd_install db      'Writing HDD IPL and CP/M-86 resident...',0dh,0ah,'$'
+msg_hdd_done    db      'HDD logical format complete (nonbootable).',0dh,0ah,'$'
+msg_hdd_system_done db   'Bootable HDD format complete.',0dh,0ah,'$'
+msg_hdd_error   db      'HDD I/O/verification failed; disk may be incomplete.',0dh,0ah,'$'
+
+INCLUDE FDIPL2D.INC
+INCLUDE FDIPL2HD.INC
+INCLUDE HDIPL.INC
+
+; 512 bytes ensure one 256-byte DMA buffer fits a physical 64-KiB page.
+sectorbuf       rs      512
+system_image    rs      03e00h
+; Two alternative 10,900-byte DMA regions; select one that stays
+; within a physical 64-KiB DMA page.
+track_area      rs      FMT_MAX+FMT_ALT
+local_stack     rs      1024
+local_stack_top db      0
+end
+
+
 msg_format      db      'Physical WRITE TRACK formatting...',0dh,0ah,'$'
 msg_install     db      'Installing IPL and clean resident image...',0dh,0ah,'$'
 msg_io_error    db      'Disk I/O or format failed at C/H/S= $'
