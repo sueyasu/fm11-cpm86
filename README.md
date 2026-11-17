@@ -4,6 +4,36 @@ This project is an initial port of CP/M-86 to the Fujitsu FM-11's 8088
 main CPU card (or NEC V20 replacement). A first-stage 2D IPL ROM and
 image builder are available. **The 2D boot to the A> prompt and empty DIR\nhave been verified in the emulator.**
 
+## Runtime console selection (IOBYTE / STAT)
+
+The CP/M-86 BIOS now implements runtime `CON:` routing through the low two
+bits of the standard CP/M IOBYTE. The normal image starts in CRT mode;
+the alternate serial image starts in TTY mode. Use the CP/M-86 `STAT`
+command to switch the console without rebuilding or rebooting:
+
+```text
+STAT CON:=TTY:     ; USART0 serial input/output
+STAT CON:=CRT:     ; FM-11 local keyboard and display
+STAT CON:=UC1:     ; local keyboard input, output to both CRT and TTY
+```
+
+`STAT CON:` can display the current console assignment (if supported
+by the supplied STAT.COM/CMD). UC1 is an FM-11-specific extension of
+the otherwise standard IOBYTE CON field. With UC1, serial output is
+best-effort with a bounded transmitter wait to avoid an absent serial
+terminal blocking the local display. `BAT:` (the fourth IOBYTE CON
+value) currently falls back to TTY, not a reader/list batch device.
+
+Only `CONST`, `CONIN`, and `CONOUT` follow CON routing; `LISTOUT` and
+`PUNCH` retain their serial behavior. `READER` still follows `CONIN`.
+The local console uses native FM-11 character controls rather than
+ANSI/VT100 output parsing.
+
+**Important:** for a normal HDD local-console boot, USART0 must be
+initialized and available before TTY or UC1 can deliver serial output;
+the 2D/2HD IPL already attempts initialization. A separate emulator
+test is needed to validate the serial path after an HDD local boot.
+
 ## Native FM-11 local console (8088)
 
 The normal CP/M-86 BIOS now sends `CONOUT` to the FM-11 display
