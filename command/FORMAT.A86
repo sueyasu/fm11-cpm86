@@ -4,9 +4,9 @@
 ; FE/CHRN/F7 and FB/data/F7 stream built in a DMA-safe buffer.
 ; The emulator must have a mounted image with a supported geometry.
 ;
-; Usage: FDFORMAT A: ... H:       physically format + initialize directory
-;        FDFORMAT /S A: ... H:    physically format + bootable system
-;        FDFORMAT /L A: ... H:    physical low-level format only.
+; Usage: FORMAT A:..H: [/S|/L]   floppy physical format
+;        FORMAT HDD or I: [/S]    whole HDD logical format
+;        /S installs an IPL and system resident; HDD /L is unsupported.
 ;
 ; A..D = 2D unit 0..3 (FD18h, 8237 CH0, 40x2x16x256)
 ; E..H = 2HD unit 0..3 (FD30h, 8237 CH1, 77x2x26x256,
@@ -73,10 +73,10 @@ fmt_show_done:
         call    crlf
         cmp     Byte Ptr target_drive,HDD_DRIVE
         jne     mode_supported
-        ; No HDD-aware CBIOS / HDD IPL has been installed yet. Do not
-        ; falsely claim a bootable HDD or a low-level media format.
-        cmp     Byte Ptr mode,MODE_DATA
-        je      mode_supported
+        ; MDC has sector READ/WRITE, not floppy WRITE TRACK; /L is
+        ; meaningless on the HDD, even though /S is now supported.
+        cmp     Byte Ptr mode,MODE_LOW
+        jne     mode_supported
         mov     dx,offset msg_hdd_options
         call    puts
         jmp     exit_program
@@ -96,8 +96,8 @@ FDF_SKIP_003:
 confirmed:
         call    crlf
         ; Save a clean source resident before modifying target media.
-        ; The source must have a readable system image in A: or E:.
-        ; Do not copy the currently executing RAM.
+        ; Read system resident from the current boot disk (A:, E: or
+        ; I:), before overwriting the target. Never snapshot live RAM.
         cmp     Byte Ptr mode,MODE_SYSTEM
         je     FDF_SKIP_004
         jmp     target_ready
@@ -129,12 +129,32 @@ target_ready:
         cmp     Byte Ptr target_drive,HDD_DRIVE
         jne     fmt_floppy_ready
         call    hdd_sense
-        jc      fmt_hdd_error
+        jnc     fmt_hdd_ready
+        jmp     fmt_hdd_error
+fmt_hdd_ready:
         mov     dx,offset msg_hdd_format
         call    puts
         call    hdd_initialize
-        jc      fmt_hdd_error
+        jnc     fmt_hdd_initialized
+        jmp     fmt_hdd_error
+fmt_hdd_initialized:
+        cmp     Byte Ptr mode,MODE_SYSTEM
+        je      fmt_hdd_install
         mov     dx,offset msg_hdd_done
+        call    puts
+        jmp     reset_exit
+fmt_hdd_install:
+        mov     dx,offset msg_hdd_install
+        call    puts
+        call    hdd_install_system
+        jnc     fmt_hdd_verify
+        jmp     fmt_hdd_error
+fmt_hdd_verify:
+        call    hdd_verify_system
+        jnc     fmt_hdd_finished
+        jmp     fmt_hdd_error
+fmt_hdd_finished:
+        mov     dx,offset msg_hdd_system_done
         call    puts
         jmp     reset_exit
 fmt_hdd_error:
@@ -358,6 +378,8 @@ find_source:
 FDF_SKIP_028:
         cmp     al,4
         je     FDF_SKIP_029
+        cmp     al,HDD_DRIVE
+        je     FDF_SKIP_029
         jmp     fs_source_bad
 FDF_SKIP_029:
 fs_source_ok:
@@ -392,13 +414,31 @@ sg_2d:
 ; The source disk stores its 0x3E00-byte image in 62 sectors.
 ; Copy into a separate transient buffer, never snapshot loaded RAM.
 save_resident:
+        cmp     Byte Ptr source_drive,HDD_DRIVE
+        jne     sr_floppy_source
+        call    hdd_sense
+        jnc     sr_hdd_ready
+        jmp     sr_error
+sr_hdd_ready:
+        mov     Word Ptr hdd_cyl,0
+        mov     Byte Ptr hdd_head,0
+        mov     Byte Ptr hdd_sector,2
+        jmp     sr_positioned
+sr_floppy_source:
         mov     al,Byte Ptr source_drive
         mov     Byte Ptr io_drive,al
         call    set_geometry
         call    position_resident
+sr_positioned:
         mov     Word Ptr image_offset,0
         mov     Word Ptr remaining,RES_SECTORS
 sr_loop:
+        cmp     Byte Ptr source_drive,HDD_DRIVE
+        jne     sr_fdc_read
+        call    hdd_read_sector
+        jnc     FDF_SKIP_034
+        jmp     sr_error
+sr_fdc_read:
         mov     Word Ptr io_size,256
         mov     Byte Ptr io_write,0
         call    disk_transfer
@@ -422,7 +462,13 @@ FDF_SKIP_034:
         pop     si
         pop     cx
         add     Word Ptr image_offset,256
+        cmp     Byte Ptr source_drive,HDD_DRIVE
+        jne     sr_advance_fd
+        call    hdd_advance
+        jmp     sr_advanced
+sr_advance_fd:
         call    advance_sector
+sr_advanced:
         dec     Word Ptr remaining
         jz     FDF_SKIP_035
         jmp     sr_loop
@@ -476,6 +522,8 @@ PS_SKIP_002:
 PS_SKIP_003:
         cmp     al,4
         je      PS_SKIP_004
+        cmp     al,HDD_DRIVE
+        je      PS_SKIP_004
         jmp     ps_next
 PS_SKIP_004:
 ps_candidate:
@@ -522,7 +570,10 @@ PS_SKIP_010:
         jmp     ps_next
 PS_SKIP_011:
         mov     al,Byte Ptr target_drive
+        cmp     al,HDD_DRIVE
+        je      ps_target_ready
         and     al,4
+ps_target_ready:
         mov     bx,si
         add     bx,1
         mov     [bx],al
