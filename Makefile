@@ -18,20 +18,31 @@ check-tools:
 $(BUILD):
 	mkdir -p $@
 
-$(BUILD)/cbios.bin: src/cbios.asm src/cbios_hdd.inc | $(BUILD)
+$(BUILD)/cbios.bin: src/cbios.asm src/cbios_local_console.inc src/cbios_hdd.inc | $(BUILD)
 	$(NASM) -f bin $< -o $@
 
 # The 2HD bootable image starts at logical E:, while the 2D image starts at A:.
-$(BUILD)/cbios_2hd.bin: src/cbios.asm src/cbios_hdd.inc | $(BUILD)
+$(BUILD)/cbios_2hd.bin: src/cbios.asm src/cbios_local_console.inc src/cbios_hdd.inc | $(BUILD)
 	$(NASM) -f bin -DBOOT_DRIVE=4 $< -o $@
 
 # Link the self-test into the CCP/BDOS-sized core region. Keep the
 # actual CBIOS at exactly 0x1900 bytes, preserving the normal IPL layout.
-$(BUILD)/cbios_selftest_resident.bin: src/cbios_selftest_resident.asm src/cbios.asm src/cbios_hdd.inc src/cbios_selftest.inc | $(BUILD)
+$(BUILD)/cbios_selftest_resident.bin: src/cbios_selftest_resident.asm src/cbios.asm src/cbios_local_console.inc src/cbios_hdd.inc src/cbios_selftest.inc | $(BUILD)
 	$(NASM) -f bin $< -o $@
 
 $(BUILD)/cbios_selftest_core.bin $(BUILD)/cbios_selftest.bin &: $(BUILD)/cbios_selftest_resident.bin tests/split_selftest_resident.py
 	$(PYTHON) tests/split_selftest_resident.py $(BUILD)/cbios_selftest_resident.bin $(BUILD)/cbios_selftest_core.bin $(BUILD)/cbios_selftest.bin
+
+# Alternate serial-console binaries, useful for existing PTY workflows.
+# The on-disk resident layout and boot-drive patch offset stay unchanged.
+$(BUILD)/cbios_serial.bin: src/cbios.asm src/cbios_local_console.inc src/cbios_hdd.inc | $(BUILD)
+	$(NASM) -f bin -DCONSOLE_LOCAL=0 $< -o $@
+
+$(BUILD)/iplrom_serial.bin: src/iplrom.asm | $(BUILD)
+	$(NASM) -f bin -DCONSOLE_LOCAL=0 $< -o $@
+
+$(BUILD)/hdd_bootrom_serial.bin: src/hdd_bootrom.asm src/hdd_boot_io.inc | $(BUILD)
+	$(NASM) -f bin -DCONSOLE_LOCAL=0 $< -o $@
 
 $(BUILD)/bootrom.bin: src/bootrom.asm | $(BUILD)
 	$(NASM) -f bin $< -o $@
@@ -100,7 +111,7 @@ HDD_MODEL ?= m2233b
 hdd_image_force:
 
 
-$(BUILD)/cbios_hdd.bin: src/cbios.asm src/cbios_hdd.inc | $(BUILD)
+$(BUILD)/cbios_hdd.bin: src/cbios.asm src/cbios_local_console.inc src/cbios_hdd.inc | $(BUILD)
 	$(NASM) -f bin -DBOOT_DRIVE=8 $< -o $@
 
 $(BUILD)/ipl_hdd.bin: src/ipl_hdd.asm src/hdd_boot_io.inc | $(BUILD)
@@ -164,7 +175,7 @@ diag: $(BUILD)/fdc2d_diag.bin
 check: $(BUILD)/cbios.bin $(BUILD)/bootrom.bin
 	$(PYTHON) tests/check_layout.py $(BUILD)/cbios.bin $(BUILD)/bootrom.bin
 
-test: check diag cbios-diag $(BUILD)/iplrom.bin $(BUILD)/test_2hd.d88 $(BUILD)/test_hdd.img $(BUILD)/hdd_bootrom.bin format-inc
+test: check diag cbios-diag $(BUILD)/iplrom.bin $(BUILD)/test_2hd.d88 $(BUILD)/test_hdd.img $(BUILD)/hdd_bootrom.bin $(BUILD)/cbios_serial.bin $(BUILD)/iplrom_serial.bin $(BUILD)/hdd_bootrom_serial.bin format-inc
 	$(PYTHON) tests/check_boot_2hd.py $(BUILD)/ipl_2hd.bin $(BUILD)/cbios_2hd.bin \
 		$(BUILD)/test_2hd.raw $(BUILD)/test_2hd.d88
 	$(PYTHON) tests/check_fdformat_inc.py $(BUILD)/ipl_2d.bin $(BUILD)/ipl_2hd.bin command/FDIPL2D.INC command/FDIPL2HD.INC
@@ -173,6 +184,7 @@ test: check diag cbios-diag $(BUILD)/iplrom.bin $(BUILD)/test_2hd.d88 $(BUILD)/t
 	$(PYTHON) tests/check_format_source.py
 	$(PYTHON) tests/check_fdformat_boot_patch.py $(BUILD)/cbios.bin $(BUILD)/cbios_2hd.bin $(BUILD)/cbios_hdd.bin
 	$(PYTHON) tests/check_image_files.py
+	$(PYTHON) tests/check_local_console.py
 	$(PYTHON) tests/check_ram_mrt.py $(BUILD)/cbios.bin
 	$(PYTHON) tests/check_cbios_segments.py
 	$(PYTHON) tests/check_diag.py $(BUILD)/fdc2d_diag.bin
