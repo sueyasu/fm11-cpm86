@@ -1,0 +1,1820 @@
+; FORMAT.A86 -- FM-11 CP/M-86 floppy and whole-HDD formatter.
+; Ported in design from pc98_cpm86/command/FDFORMAT.A86.
+; Uses FM-11 WD179x WRITE TRACK command F0h with a complete
+; FE/CHRN/F7 and FB/data/F7 stream built in a DMA-safe buffer.
+; The emulator must have a mounted image with a supported geometry.
+;
+; Usage: FDFORMAT A: ... H:       physically format + initialize directory
+;        FDFORMAT /S A: ... H:    physically format + bootable system
+;        FDFORMAT /L A: ... H:    physical low-level format only.
+;
+; A..D = 2D unit 0..3 (FD18h, 8237 CH0, 40x2x16x256)
+; E..H = 2HD unit 0..3 (FD30h, 8237 CH1, 77x2x26x256,
+;          first physical side 26x128-byte FM sectors).
+; 2D /S IPL: first two 256-byte sectors, resident from C0/H0/S3.
+; 2HD /S IPL: first four 128-byte sectors, resident from C0/H1/S1.
+; The resident image is always 62x256 bytes (0x3E00).
+;
+; ASM86 FORMAT.A86
+; GENCMD FORMAT
+;
+BDOSINT        equ     0e0h
+BIOS_SEG       equ     0400h
+BDOS_CURDRV    equ     024b7h
+MODE_DATA      equ     0
+MODE_SYSTEM    equ     1
+MODE_LOW       equ     2
+RES_SECTORS    equ     62
+FMT_FILL       equ     0e5h
+FMT_TRACK2D    equ     6400
+FMT_TRACK2HD   equ     10900
+FMT_MAX        equ     FMT_TRACK2HD
+FMT_ALT        equ     FMT_TRACK2HD
+FMT_64K_LIMIT  equ     65536-FMT_MAX
+HDD_DRIVE      equ     8
+HDD_DMA_LIMIT  equ     0ff00h
+HDD_SECTOR     equ     256
+HDD_SPT        equ     32
+HDD_DMA_CH     equ     2
+
+cseg
+start:
+        ; CP/M-86 compact-model DS addresses DSEG, including the base page.
+        ; Replace the CCP's small stack with a private 1 KiB stack.
+        mov     ax,ds
+        mov     ss,ax
+        mov     sp,offset local_stack_top
+        mov     dx,offset msg_title
+        call    puts
+        call    parse_tail
+        jc     FDF_SKIP_001
+        jmp     parsed
+FDF_SKIP_001:
+        mov     dx,offset msg_usage
+        call    puts
+        jmp     exit_program
+
+parsed:
+        ; Identify the destructive target before requesting confirmation.
+        mov     dx,offset msg_target
+        call    puts
+        mov     al,Byte Ptr target_drive
+        cmp     al,HDD_DRIVE
+        jne     fmt_show_floppy
+        mov     dx,offset msg_hdd_name
+        call    puts
+        jmp     fmt_show_done
+fmt_show_floppy:
+        add     al,'A'
+        call    putc
+        mov     al,':'
+        call    putc
+fmt_show_done:
+        call    crlf
+        cmp     Byte Ptr target_drive,HDD_DRIVE
+        jne     mode_supported
+        ; No HDD-aware CBIOS / HDD IPL has been installed yet. Do not
+        ; falsely claim a bootable HDD or a low-level media format.
+        cmp     Byte Ptr mode,MODE_DATA
+        je      mode_supported
+        mov     dx,offset msg_hdd_options
+        call    puts
+        jmp     exit_program
+mode_supported:
+        mov     dx,offset msg_warning
+        call    puts
+        mov     cl,1
+        int     BDOSINT
+        call    uppercase
+        cmp     al,'Y'
+        jne     FDF_SKIP_003
+        jmp     confirmed
+FDF_SKIP_003:
+        mov     dx,offset msg_abort
+        call    puts
+        jmp     exit_program
+confirmed:
+        call    crlf
+        ; Save a clean source resident before modifying target media.
+        ; The source must have a readable system image in A: or E:.
+        ; Do not copy the currently executing RAM.
+        cmp     Byte Ptr mode,MODE_SYSTEM
+        je     FDF_SKIP_004
+        jmp     target_ready
+FDF_SKIP_004:
+        call    find_source
+        jnc     FDF_SKIP_005
+        jmp     source_failed
+FDF_SKIP_005:
+        call    save_resident
+        jnc     FDF_SKIP_006
+        jmp     source_failed
+FDF_SKIP_006:
+        ; The resident source may be E: while the destination is 2D,
+        ; or A: while the destination is 2HD. Rebind the cold boot
+        ; drive in the saved image before overwriting any target media.
+        call    patch_system_boot_drive
+        jnc     fdf_boot_patched
+        mov     dx,offset msg_patch_error
+        call    puts
+        jmp     exit_program
+fdf_boot_patched:
+        jmp     target_ready
+source_failed:
+        mov     dx,offset msg_source_error
+        call    puts
+        jmp     exit_program
+
+target_ready:
+        cmp     Byte Ptr target_drive,HDD_DRIVE
+        jne     fmt_floppy_ready
+        call    hdd_sense
+        jc      fmt_hdd_error
+        mov     dx,offset msg_hdd_format
+        call    puts
+        call    hdd_initialize
+        jc      fmt_hdd_error
+        mov     dx,offset msg_hdd_done
+        call    puts
+        jmp     reset_exit
+fmt_hdd_error:
+        mov     dx,offset msg_hdd_error
+        call    puts
+        jmp     reset_exit
+fmt_floppy_ready:
+        mov     al,Byte Ptr target_drive
+        mov     Byte Ptr io_drive,al
+        call    set_geometry
+        mov     dx,offset msg_format
+        call    puts
+        call    initialize_media
+        jnc     FDF_SKIP_007
+        jmp     io_failed
+FDF_SKIP_007:
+        cmp     Byte Ptr mode,MODE_LOW
+        jne    fdf_not_low
+        mov     dx,offset msg_done_low
+        call    puts
+        jmp     reset_exit
+fdf_not_low:
+        cmp     Byte Ptr mode,MODE_SYSTEM
+        je     FDF_SKIP_008
+        jmp     done_data
+FDF_SKIP_008:
+        mov     dx,offset msg_install
+        call    puts
+        call    install_system
+        jnc     FDF_SKIP_009
+        jmp     io_failed
+FDF_SKIP_009:
+        call    verify_system
+        jnc     FDF_SKIP_010
+        jmp     io_failed
+FDF_SKIP_010:
+        mov     dx,offset msg_done_system
+        call    puts
+        jmp     reset_exit
+done_data:
+        mov     dx,offset msg_done_data
+        call    puts
+        jmp     reset_exit
+io_failed:
+        mov     dx,offset msg_io_error
+        call    puts
+        mov     al,Byte Ptr io_cyl
+        call    hex8
+        mov     al,'/'
+        call    putc
+        mov     al,Byte Ptr io_head
+        call    hex8
+        mov     al,'/'
+        call    putc
+        mov     al,Byte Ptr io_sector
+        call    hex8
+        call    crlf
+
+reset_exit:
+        ; Force BDOS to discard directory/allocation state changed
+        ; outside the ordinary BIOS/BDOS record-I/O interface.
+        mov     cl,13
+        int     BDOSINT
+exit_program:
+        mov     cl,0
+        int     BDOSINT
+        hlt
+
+; Parse command line at DS:0080h. One A:..H: drive and /S or /L.
+; No media density option: FM-11 uses separate physical controllers.
+parse_tail:
+        mov     Byte Ptr target_drive,0ffh
+        mov     Byte Ptr mode,MODE_DATA
+        xor     cx,cx
+        mov     cl,Byte Ptr .080h
+        mov     si,081h
+pt_loop:
+        or      cx,cx
+        jnz     FDF_SKIP_011
+        jmp     pt_done
+FDF_SKIP_011:
+        mov     al,[si]
+        cmp     al,' '
+        jne     FDF_SKIP_012
+        jmp     pt_next
+FDF_SKIP_012:
+        cmp     al,9
+        jne     FDF_SKIP_013
+        jmp     pt_next
+FDF_SKIP_013:
+        cmp     al,':'
+        jne     FDF_SKIP_014
+        jmp     pt_next
+FDF_SKIP_014:
+        cmp     al,'/'
+        jne     FDF_SKIP_015
+        jmp     pt_option
+FDF_SKIP_015:
+        cmp     al,'-'
+        jne     FDF_SKIP_016
+        jmp     pt_option
+FDF_SKIP_016:
+        call    uppercase
+        ; Match HDD (three letters, case-insensitive) before H:.
+        ; A single I: also names the same physical HDD.
+        cmp     al,'H'
+        jne     fmt_pt_letter
+        cmp     cx,3
+        jb      fmt_pt_letter
+        mov     bx,si
+        inc     bx
+        mov     ah,[bx]
+        and     ah,05fh
+        cmp     ah,'D'
+        jne     fmt_pt_letter
+        inc     bx
+        mov     ah,[bx]
+        and     ah,05fh
+        cmp     ah,'D'
+        jne     fmt_pt_letter
+        cmp     Byte Ptr target_drive,0ffh
+        jne     pt_bad
+        mov     Byte Ptr target_drive,HDD_DRIVE
+        add     si,3
+        sub     cx,3
+        jmp     pt_loop
+fmt_pt_letter:
+        cmp     al,'A'
+        jae     FDF_SKIP_017
+        jmp     pt_bad
+FDF_SKIP_017:
+        cmp     al,'I'
+        jbe     FDF_SKIP_018
+        jmp     pt_bad
+FDF_SKIP_018:
+        cmp     Byte Ptr target_drive,0ffh
+        je     FDF_SKIP_019
+        jmp     pt_bad
+FDF_SKIP_019:
+        sub     al,'A'
+        mov     Byte Ptr target_drive,al
+        jmp     pt_next
+pt_option:
+        inc     si
+        dec     cx
+        jnz     FDF_SKIP_020
+        jmp     pt_bad
+FDF_SKIP_020:
+        mov     al,[si]
+        call    uppercase
+        cmp     al,'S'
+        jne     FDF_SKIP_021
+        jmp     pt_system
+FDF_SKIP_021:
+        cmp     al,'L'
+        jne     FDF_SKIP_022
+        jmp     pt_low
+FDF_SKIP_022:
+        jmp     pt_bad
+pt_system:
+        cmp     Byte Ptr mode,MODE_DATA
+        je     FDF_SKIP_023
+        jmp     pt_bad
+FDF_SKIP_023:
+        mov     Byte Ptr mode,MODE_SYSTEM
+        jmp     pt_next
+pt_low:
+        cmp     Byte Ptr mode,MODE_DATA
+        je     FDF_SKIP_024
+        jmp     pt_bad
+FDF_SKIP_024:
+        mov     Byte Ptr mode,MODE_LOW
+pt_next:
+        inc     si
+        dec     cx
+        jmp     pt_loop
+pt_done:
+        cmp     Byte Ptr target_drive,0ffh
+        jne     FDF_SKIP_025
+        jmp     pt_bad
+FDF_SKIP_025:
+        clc
+        ret
+pt_bad:
+        stc
+        ret
+
+uppercase:
+        cmp     al,'a'
+        jae     FDF_SKIP_026
+        jmp     up_done
+FDF_SKIP_026:
+        cmp     al,'z'
+        jbe     FDF_SKIP_027
+        jmp     up_done
+FDF_SKIP_027:
+        and     al,05fh
+up_done:
+        ret
+
+; Read the BDOS source drive. CP/M-86 supports both physical FDC
+; families in the same CBIOS, so /S may copy from A: to 2HD or
+; E: to 2D. The copied INIT boot drive is patched after READ.
+find_source:
+        ; ASM86 1.1 cannot use an absolute EQU as [displacement].
+        ; Select the resident segment, then use BX for the address.
+        ; Save DS and BX because both are needed by the caller.
+        push    ds
+        push    bx
+        mov     ax,BIOS_SEG
+        mov     ds,ax
+        mov     bx,BDOS_CURDRV
+        mov     al,[bx]
+        pop     bx
+        pop     ds
+        cmp     al,0
+        jne     FDF_SKIP_028
+        jmp     fs_source_ok
+FDF_SKIP_028:
+        cmp     al,4
+        je     FDF_SKIP_029
+        jmp     fs_source_bad
+FDF_SKIP_029:
+fs_source_ok:
+        mov     Byte Ptr source_drive,al
+        clc
+        ret
+fs_source_bad:
+        stc
+        ret
+
+; Setup transfer geometry, including selected physical drive.
+; Input io_drive = CP/M drive 0..7.
+set_geometry:
+        mov     al,Byte Ptr io_drive
+        cmp     al,4
+        jae     FDF_SKIP_033
+        jmp     sg_2d
+FDF_SKIP_033:
+        sub     al,4
+        mov     Byte Ptr io_unit,al
+        mov     Byte Ptr io_channel,1
+        mov     Byte Ptr sectors_per_side,26
+        mov     Byte Ptr cylinders,77
+        ret
+sg_2d:
+        mov     Byte Ptr io_unit,al
+        mov     Byte Ptr io_channel,0
+        mov     Byte Ptr sectors_per_side,16
+        mov     Byte Ptr cylinders,40
+        ret
+
+; The source disk stores its 0x3E00-byte image in 62 sectors.
+; Copy into a separate transient buffer, never snapshot loaded RAM.
+save_resident:
+        mov     al,Byte Ptr source_drive
+        mov     Byte Ptr io_drive,al
+        call    set_geometry
+        call    position_resident
+        mov     Word Ptr image_offset,0
+        mov     Word Ptr remaining,RES_SECTORS
+sr_loop:
+        mov     Word Ptr io_size,256
+        mov     Byte Ptr io_write,0
+        call    disk_transfer
+        jnc     FDF_SKIP_034
+        jmp     sr_error
+FDF_SKIP_034:
+        push    cx
+        push    si
+        push    di
+        push    es
+        push    ds
+        pop     es
+        mov     si,offset sectorbuf
+        mov     di,offset system_image
+        add     di,Word Ptr image_offset
+        mov     cx,128
+        cld
+        rep     movsw
+        pop     es
+        pop     di
+        pop     si
+        pop     cx
+        add     Word Ptr image_offset,256
+        call    advance_sector
+        dec     Word Ptr remaining
+        jz     FDF_SKIP_035
+        jmp     sr_loop
+FDF_SKIP_035:
+        ; Resident CBIOS begins immediately after the 0x2500-byte
+        ; external CCP/BDOS core.
+        cmp     Byte Ptr system_image+02500h,0e9h
+        je     FDF_SKIP_036
+        jmp     sr_error
+FDF_SKIP_036:
+        clc
+        ret
+sr_error:
+        stc
+        ret
+
+; CBIOS uses one common 0x3E00-byte resident for both FDC families.
+; The source image's INIT begins at the first CBIOS JMP vector's target.
+; In the established CBIOS ABI its cold-drive initialization is:
+;   B9 <drive> 00   MOV CX,BOOT_DRIVE
+;   88 0E xx xx     MOV [cur_disk],CL
+;   88 0E B7 24     MOV [024B7h],CL   (BDOS CURDRV)
+; Locate and validate the complete signature within the first 96 bytes
+; of INIT. Only the immediate low byte is changed. This supports
+; existing 2D and 2HD resident images; an unexpected CBIOS fails
+; safely before the target disk is changed.
+patch_system_boot_drive:
+        mov     si,offset system_image+02500h
+        cmp     Byte Ptr [si],0e9h
+        je      PS_SKIP_001
+        jmp     ps_bad
+PS_SKIP_001:
+        mov     bx,si
+        inc     bx
+        mov     bx,[bx]
+        add     bx,02503h
+        add     bx,offset system_image
+        mov     si,bx
+        mov     cx,96
+ps_scan:
+        cmp     Byte Ptr [si],0b9h
+        je      PS_SKIP_002
+        jmp     ps_next
+PS_SKIP_002:
+        mov     bx,si
+        add     bx,1
+        mov     al,[bx]
+        cmp     al,0
+        jne      PS_SKIP_003
+        jmp     ps_candidate
+PS_SKIP_003:
+        cmp     al,4
+        je      PS_SKIP_004
+        jmp     ps_next
+PS_SKIP_004:
+ps_candidate:
+        mov     bx,si
+        add     bx,2
+        cmp     Byte Ptr [bx],0
+        je      PS_SKIP_005
+        jmp     ps_next
+PS_SKIP_005:
+        mov     bx,si
+        add     bx,3
+        cmp     Byte Ptr [bx],088h
+        je      PS_SKIP_006
+        jmp     ps_next
+PS_SKIP_006:
+        mov     bx,si
+        add     bx,4
+        cmp     Byte Ptr [bx],00eh
+        je      PS_SKIP_007
+        jmp     ps_next
+PS_SKIP_007:
+        mov     bx,si
+        add     bx,7
+        cmp     Byte Ptr [bx],088h
+        je      PS_SKIP_008
+        jmp     ps_next
+PS_SKIP_008:
+        mov     bx,si
+        add     bx,8
+        cmp     Byte Ptr [bx],00eh
+        je      PS_SKIP_009
+        jmp     ps_next
+PS_SKIP_009:
+        mov     bx,si
+        add     bx,9
+        cmp     Byte Ptr [bx],0b7h
+        je      PS_SKIP_010
+        jmp     ps_next
+PS_SKIP_010:
+        mov     bx,si
+        add     bx,10
+        cmp     Byte Ptr [bx],024h
+        je      PS_SKIP_011
+        jmp     ps_next
+PS_SKIP_011:
+        mov     al,Byte Ptr target_drive
+        and     al,4
+        mov     bx,si
+        add     bx,1
+        mov     [bx],al
+        clc
+        ret
+ps_next:
+        inc     si
+        dec     cx
+        jz      ps_bad
+        jmp     ps_scan
+ps_bad:
+        stc
+        ret
+
+position_resident:
+        mov     Byte Ptr io_cyl,0
+        mov     Byte Ptr io_head,0
+        mov     Byte Ptr io_sector,3
+        cmp     Byte Ptr io_channel,0
+        jne     FDF_SKIP_037
+        jmp     pr_done
+FDF_SKIP_037:
+        mov     Byte Ptr io_head,1
+        mov     Byte Ptr io_sector,1
+pr_done:
+        ret
+
+advance_sector:
+        inc     Byte Ptr io_sector
+        mov     al,Byte Ptr io_sector
+        cmp     al,Byte Ptr sectors_per_side
+        ja     FDF_SKIP_038
+        jmp     adv_done
+FDF_SKIP_038:
+        mov     Byte Ptr io_sector,1
+        xor     Byte Ptr io_head,1
+        jz     FDF_SKIP_039
+        jmp     adv_done
+FDF_SKIP_039:
+        inc     Byte Ptr io_cyl
+adv_done:
+        ret
+
+; Generate and write every physical side-track with WD17xx F0h.
+; 2D: 40 cylinders, 2 sides, 16 IDs, 256 byte data, 6400 DMA bytes.
+; 2HD: 77 cylinders, 2 sides, 26 IDs, 256 byte data, 10900 DMA bytes.
+; C0/H0 on 2HD is FM with 128 byte records and N=0.
+initialize_media:
+        mov     Byte Ptr io_cyl,0
+fmt_cyl_loop:
+        mov     Byte Ptr io_head,0
+fmt_head_loop:
+        call    build_format_track
+        jc      fmt_fail
+        call    format_transfer
+        jc      fmt_fail
+        inc     Byte Ptr io_head
+        cmp     Byte Ptr io_head,2
+        jb      fmt_head_loop
+        inc     Byte Ptr io_cyl
+        mov     al,Byte Ptr io_cyl
+        cmp     al,Byte Ptr cylinders
+        jb      fmt_cyl_loop
+        clc
+        ret
+fmt_fail:
+        stc
+        ret
+
+; Choose a DMA-safe location for up to 10,900 consecutive bytes.
+; Two buffers separated by FMT_ALT guarantee one does not cross
+; the physical 64-KiB page boundary, regardless of transient DS.
+; Both candidates fit wholly within the transient DSEG.
+choose_track_buffer:
+        mov     Word Ptr track_ptr,offset track_area
+        mov     ax,ds
+        mov     bx,16
+        mul     bx
+        add     ax,offset track_area
+        cmp     ax,FMT_64K_LIMIT
+        jbe     ctb_good
+        add     Word Ptr track_ptr,FMT_ALT
+ctb_good:
+        ret
+
+; Fill the whole DMA stream with 4Eh gap bytes, then place
+; address marks and CRC-generation tokens like NitrOS-9 format.
+; Format pattern:
+;   00*5 FE C H R N F7 00*5 FB E5*sector_size F7
+; Validated by FloppyDevice::formatTrack on the emulator.
+build_format_track:
+        call    choose_track_buffer
+        mov     Word Ptr track_length,FMT_TRACK2D
+        mov     Word Ptr fmt_secbytes,256
+        mov     Byte Ptr fmt_n,1
+        cmp     Byte Ptr io_channel,0
+        je      bft_geometry_done
+        mov     Word Ptr track_length,FMT_TRACK2HD
+        cmp     Byte Ptr io_cyl,0
+        jne     bft_geometry_done
+        cmp     Byte Ptr io_head,0
+        jne     bft_geometry_done
+        mov     Word Ptr fmt_secbytes,128
+        mov     Byte Ptr fmt_n,0
+bft_geometry_done:
+        push    es
+        push    di
+        push    cx
+        push    bx
+        push    ax
+        push    ds
+        pop     es
+        mov     di,Word Ptr track_ptr
+        mov     cx,Word Ptr track_length
+        shr     cx,1
+        mov     ax,04e4eh
+        cld
+        rep     stosw
+
+        mov     di,Word Ptr track_ptr
+        mov     bl,1
+bft_sector_loop:
+        ; 5 ID sync zeros
+        mov     cx,5
+        xor     ax,ax
+        rep     stosb
+        mov     al,0feh
+        stosb
+        mov     al,Byte Ptr io_cyl
+        stosb
+        mov     al,Byte Ptr io_head
+        stosb
+        mov     al,bl
+        stosb
+        mov     al,Byte Ptr fmt_n
+        stosb
+        mov     al,0f7h
+        stosb
+        ; 5 data sync zeros and 256/128 data bytes
+        mov     cx,5
+        xor     ax,ax
+        rep     stosb
+        mov     al,0fbh
+        stosb
+        mov     cx,Word Ptr fmt_secbytes
+        mov     al,FMT_FILL
+        rep     stosb
+        mov     al,0f7h
+        stosb
+        inc     bl
+        mov     al,Byte Ptr sectors_per_side
+        cmp     bl,al
+        jbe     bft_sector_loop
+
+        pop     ax
+        pop     bx
+        pop     cx
+        pop     di
+        pop     es
+        clc
+        ret
+
+format_transfer:
+        ; Use the same FDC and DMA ports as ordinary sector transfers,
+        ; but WRITE TRACK always transfers memory to controller.
+        mov     ax,Word Ptr track_ptr
+        mov     Word Ptr dma_ptr,ax
+        mov     ax,Word Ptr track_length
+        mov     Word Ptr dma_length,ax
+        mov     Byte Ptr dma_command,0f0h
+        mov     Byte Ptr dma_write,1
+        call    physical_dma_transfer
+        ret
+
+; Write the appropriate 512-byte first stage and 62 resident sectors.
+install_system:
+        mov     al,Byte Ptr target_drive
+        mov     Byte Ptr io_drive,al
+        call    set_geometry
+        mov     Byte Ptr io_cyl,0
+        mov     Byte Ptr io_head,0
+        mov     Byte Ptr io_sector,1
+        mov     Word Ptr image_offset,0
+        mov     Word Ptr remaining,2
+        cmp     Byte Ptr io_channel,0
+        jne     FDF_SKIP_045
+        jmp     is_ipl_loop
+FDF_SKIP_045:
+        mov     Word Ptr remaining,4
+is_ipl_loop:
+        push    cx
+        push    si
+        push    di
+        push    es
+        push    ds
+        pop     es
+        mov     di,offset sectorbuf
+        mov     si,offset fdipl2d_template
+        mov     cx,128
+        cmp     Byte Ptr io_channel,0
+        jne     FDF_SKIP_046
+        jmp     is_copy_ipl
+FDF_SKIP_046:
+        mov     si,offset fdipl2hd_template
+        mov     cx,64
+is_copy_ipl:
+        add     si,Word Ptr image_offset
+        cld
+        rep     movsw
+        pop     es
+        pop     di
+        pop     si
+        pop     cx
+        mov     Word Ptr io_size,256
+        cmp     Byte Ptr io_channel,0
+        jne     FDF_SKIP_047
+        jmp     is_write_ipl
+FDF_SKIP_047:
+        mov     Word Ptr io_size,128
+is_write_ipl:
+        mov     Byte Ptr io_write,1
+        call    disk_transfer
+        jnc     FDF_SKIP_048
+        jmp     is_fail
+FDF_SKIP_048:
+        mov     ax,Word Ptr io_size
+        add     Word Ptr image_offset,ax
+        call    advance_sector
+        dec     Word Ptr remaining
+        jz     FDF_SKIP_049
+        jmp     is_ipl_loop
+FDF_SKIP_049:
+
+        call    position_resident
+        mov     Word Ptr image_offset,0
+        mov     Word Ptr remaining,RES_SECTORS
+is_resident_loop:
+        call    prepare_resident_sector
+        mov     Word Ptr io_size,256
+        mov     Byte Ptr io_write,1
+        call    disk_transfer
+        jnc     FDF_SKIP_050
+        jmp     is_fail
+FDF_SKIP_050:
+        add     Word Ptr image_offset,256
+        call    advance_sector
+        dec     Word Ptr remaining
+        jz     FDF_SKIP_051
+        jmp     is_resident_loop
+FDF_SKIP_051:
+        clc
+        ret
+is_fail:
+        stc
+        ret
+
+prepare_resident_sector:
+        push    cx
+        push    si
+        push    di
+        push    es
+        push    ds
+        pop     es
+        mov     si,offset system_image
+        add     si,Word Ptr image_offset
+        mov     di,offset sectorbuf
+        mov     cx,128
+        cld
+        rep     movsw
+        pop     es
+        pop     di
+        pop     si
+        pop     cx
+        ret
+
+verify_system:
+        mov     al,Byte Ptr target_drive
+        mov     Byte Ptr io_drive,al
+        call    set_geometry
+        call    position_resident
+        mov     Word Ptr image_offset,0
+        mov     Word Ptr remaining,RES_SECTORS
+vs_loop:
+        mov     Word Ptr io_size,256
+        mov     Byte Ptr io_write,0
+        call    disk_transfer
+        jnc     FDF_SKIP_052
+        jmp     vs_fail
+FDF_SKIP_052:
+        push    cx
+        push    si
+        push    di
+        push    es
+        push    ds
+        pop     es
+        mov     si,offset system_image
+        add     si,Word Ptr image_offset
+        mov     di,offset sectorbuf
+        mov     cx,256
+        cld
+        repe    cmpsb
+        pop     es
+        pop     di
+        pop     si
+        pop     cx
+        je     FDF_SKIP_053
+        jmp     vs_fail
+FDF_SKIP_053:
+        add     Word Ptr image_offset,256
+        call    advance_sector
+        dec     Word Ptr remaining
+        jz     FDF_SKIP_054
+        jmp     vs_loop
+FDF_SKIP_054:
+        clc
+        ret
+vs_fail:
+        stc
+        ret
+
+; Direct 8237 + FDC one-physical-sector transfer. The DMA buffer is
+; private and never crosses a 64-KiB DMA page. Both CPU-family
+; FDCs use their real hardware I/O ports.
+;
+; io_write = 0 read, 1 write; io_size = 128 or 256
+; Result CF clear only on FDC status 0 AND terminal count.
+disk_transfer:
+        mov     Word Ptr dma_ptr,offset sectorbuf
+        mov     ax,Word Ptr io_size
+        mov     Word Ptr dma_length,ax
+        mov     Byte Ptr dma_command,080h
+        cmp     Byte Ptr io_write,0
+        je      dt_read_cmd
+        mov     Byte Ptr dma_command,0a0h
+dt_read_cmd:
+        mov     al,Byte Ptr io_write
+        mov     Byte Ptr dma_write,al
+        call    physical_dma_transfer
+        ret
+
+physical_dma_transfer:
+        push    ax
+        push    bx
+        push    cx
+        push    dx
+        push    si
+        push    di
+        push    bp
+        mov     ax,ds
+        mov     si,16
+        mul     si
+        add     ax,Word Ptr dma_ptr
+        adc     dx,0
+        mov     bx,ax
+        add     bx,Word Ptr dma_length
+        jnc     fdf_dma_page_ok
+        jmp     dt_bad
+fdf_dma_page_ok:
+        cmp     dx,15
+        jbe     FDF_SKIP_056
+        jmp     dt_bad
+FDF_SKIP_056:
+        mov     si,ax
+        mov     di,dx
+
+        mov     dx,01ah
+        mov     al,4
+        add     al,Byte Ptr io_channel
+        out     dx,al
+        mov     dx,01ch
+        xor     al,al
+        out     dx,al
+
+        mov     dx,010h
+        cmp     Byte Ptr io_channel,0
+        jne     FDF_SKIP_057
+        jmp     dt_addr
+FDF_SKIP_057:
+        mov     dl,012h
+dt_addr:
+        mov     ax,si
+        out     dx,al
+        mov     al,ah
+        out     dx,al
+
+        mov     dx,011h
+        cmp     Byte Ptr io_channel,0
+        jne     FDF_SKIP_058
+        jmp     dt_count
+FDF_SKIP_058:
+        mov     dl,013h
+dt_count:
+        mov     ax,Word Ptr dma_length
+        dec     ax
+        out     dx,al
+        mov     al,ah
+        out     dx,al
+
+        mov     dx,020h
+        cmp     Byte Ptr io_channel,0
+        jne     FDF_SKIP_059
+        jmp     dt_bank
+FDF_SKIP_059:
+        mov     dl,021h
+dt_bank:
+        mov     ax,di
+        out     dx,al
+
+        mov     dx,01bh
+        mov     al,044h
+        cmp     Byte Ptr dma_write,0
+        jne     FDF_SKIP_060
+        jmp     dt_mode
+FDF_SKIP_060:
+        mov     al,048h
+dt_mode:
+        add     al,Byte Ptr io_channel
+        out     dx,al
+        mov     dx,018h
+        in      al,dx
+
+        mov     dx,0fd19h
+        cmp     Byte Ptr io_channel,0
+        jne     FDF_SKIP_061
+        jmp     dt_track
+FDF_SKIP_061:
+        mov     dl,031h
+dt_track:
+        mov     al,Byte Ptr io_cyl
+        out     dx,al
+        inc     dx
+        mov     al,Byte Ptr io_sector
+        out     dx,al
+
+        mov     dx,0fd1ch
+        cmp     Byte Ptr io_channel,0
+        jne     FDF_SKIP_062
+        jmp     dt_side
+FDF_SKIP_062:
+        mov     dl,034h
+dt_side:
+        mov     al,Byte Ptr io_head
+        out     dx,al
+        inc     dx
+        mov     al,Byte Ptr io_unit
+        out     dx,al
+
+        mov     dx,01ah
+        mov     al,Byte Ptr io_channel
+        out     dx,al
+
+        mov     dx,0fd18h
+        cmp     Byte Ptr io_channel,0
+        jne     FDF_SKIP_063
+        jmp     dt_command
+FDF_SKIP_063:
+        mov     dl,030h
+dt_command:
+        mov     al,Byte Ptr dma_command
+dt_start:
+        out     dx,al
+        mov     cx,0ffffh
+dt_poll:
+        in      al,dx
+        test    al,010h
+        jz     FDF_SKIP_065
+        jmp     dt_fail
+FDF_SKIP_065:
+        test    al,002h
+        jnz     FDF_SKIP_066
+        jmp     dt_check
+FDF_SKIP_066:
+        loop    dt_poll
+        jmp     dt_fail
+dt_check:
+        or      al,al
+        jz     FDF_SKIP_067
+        jmp     dt_fail
+FDF_SKIP_067:
+        mov     dx,018h
+        in      al,dx
+        cmp     Byte Ptr io_channel,0
+        jne     FDF_SKIP_068
+        jmp     dt_tc0
+FDF_SKIP_068:
+        test    al,2
+        jnz     FDF_SKIP_069
+        jmp     dt_fail
+FDF_SKIP_069:
+        jmp     dt_ok
+dt_tc0:
+        test    al,1
+        jnz     FDF_SKIP_070
+        jmp     dt_fail
+FDF_SKIP_070:
+dt_ok:
+        clc
+        jmp     dt_finish
+dt_fail:
+dt_bad:
+        stc
+dt_finish:
+        pushf
+        mov     dx,01ah
+        mov     al,4
+        add     al,Byte Ptr io_channel
+        out     dx,al
+        popf
+        pop     bp
+        pop     di
+        pop     si
+        pop     dx
+        pop     cx
+        pop     bx
+        pop     ax
+        ret
+
+; ----- Single physical FM-11 MDC hard disk --------------------------
+; Controller FDC0..FDC2 and 8237 DMA channel 2, 256-byte records.
+; No PC-98 SCSI ID or partition map. Do not touch a mounted OS disk.
+; A future CBIOS will use OFF=heads (one reserved cylinder) and
+; 16-KiB blocks (BSH=7) with 512 directory entries.
+;
+; Sense types and exact geometry are from MdcHddDevice and FM11 RBF.
+hdd_sense:
+        mov     dx,0fdc2h
+        mov     al,020h
+        out     dx,al
+        mov     dx,0fdc0h
+        mov     al,014h
+        out     dx,al
+        mov     dx,0fdc1h
+        xor     al,al
+        out     dx,al
+        out     dx,al
+        call    hdd_result_wait
+        jc      hdd_sense_bad
+        mov     al,Byte Ptr hdd_result+4
+        cmp     al,004h
+        jne     hdd_ty08
+        mov     Word Ptr hdd_cylinders,157
+        mov     Byte Ptr hdd_heads,4
+        jmp     hdd_sense_mode
+hdd_ty08:
+        cmp     al,008h
+        jne     hdd_ty05
+        mov     Word Ptr hdd_cylinders,315
+        mov     Byte Ptr hdd_heads,2
+        jmp     hdd_sense_mode
+hdd_ty05:
+        cmp     al,005h
+        jne     hdd_ty09
+        mov     Word Ptr hdd_cylinders,157
+        mov     Byte Ptr hdd_heads,6
+        jmp     hdd_sense_mode
+hdd_ty09:
+        cmp     al,009h
+        jne     hdd_ty0a
+        mov     Word Ptr hdd_cylinders,315
+        mov     Byte Ptr hdd_heads,4
+        jmp     hdd_sense_mode
+hdd_ty0a:
+        cmp     al,00ah
+        jne     hdd_ty0c
+        mov     Word Ptr hdd_cylinders,315
+        mov     Byte Ptr hdd_heads,6
+        jmp     hdd_sense_mode
+hdd_ty0c:
+        cmp     al,00ch
+        jne     hdd_ty14
+        mov     Word Ptr hdd_cylinders,315
+        mov     Byte Ptr hdd_heads,8
+        jmp     hdd_sense_mode
+hdd_ty14:
+        cmp     al,014h
+        jne     hdd_ty15
+        mov     Word Ptr hdd_cylinders,747
+        mov     Byte Ptr hdd_heads,4
+        jmp     hdd_sense_mode
+hdd_ty15:
+        cmp     al,015h
+        jne     hdd_ty16
+        mov     Word Ptr hdd_cylinders,747
+        mov     Byte Ptr hdd_heads,7
+        jmp     hdd_sense_mode
+hdd_ty16:
+        cmp     al,016h
+        jne     hdd_sense_bad
+        mov     Word Ptr hdd_cylinders,747
+        mov     Byte Ptr hdd_heads,11
+hdd_sense_mode:
+        ; Force CHS mode (command 11h with 60h,0).
+        mov     dx,0fdc0h
+        mov     al,011h
+        out     dx,al
+        mov     dx,0fdc1h
+        mov     al,060h
+        out     dx,al
+        xor     al,al
+        out     dx,al
+        call    hdd_result_wait
+        ret
+hdd_sense_bad:
+        stc
+        ret
+
+; Wait for ten-byte MDC response. Error is bit 7 of result byte 0.
+hdd_result_wait:
+        push    bx
+        push    cx
+        push    dx
+        mov     dx,0fdc0h
+        mov     cx,0ffffh
+hdd_rsp_poll:
+        in      al,dx
+        test    al,040h
+        jnz     hdd_rsp_ready
+        loop    hdd_rsp_poll
+        jmp     hdd_rsp_error
+hdd_rsp_ready:
+        mov     dx,0fdc1h
+        mov     bx,offset hdd_result
+        mov     cx,10
+hdd_rsp_bytes:
+        in      al,dx
+        mov     [bx],al
+        inc     bx
+        loop    hdd_rsp_bytes
+        mov     al,Byte Ptr hdd_result
+        test    al,080h
+        jnz     hdd_rsp_error
+        clc
+        jmp     hdd_rsp_done
+hdd_rsp_error:
+        stc
+hdd_rsp_done:
+        pop     dx
+        pop     cx
+        pop     bx
+        ret
+
+; Erase the first cylinder (old IPL, system area) and the first
+; 64 sectors (16 KiB directory allocation block) of cylinder 1.
+; This deliberately does not zero data blocks beyond the directory.
+hdd_initialize:
+        push    es
+        push    ds
+        pop     es
+        mov     di,offset sectorbuf
+        mov     cx,128
+        mov     ax,0e5e5h
+        cld
+        rep     stosw
+        pop     es
+        mov     Word Ptr hdd_cyl,0
+        mov     Byte Ptr hdd_head,0
+        mov     Byte Ptr hdd_sector,0
+hdd_init_first_cyl:
+        call    hdd_write_sector
+        jc      hdd_init_fail
+        call    hdd_advance
+        cmp     Word Ptr hdd_cyl,0
+        je      hdd_init_first_cyl
+        ; hdd_advance has moved to C1/H0/S0.
+        mov     Word Ptr hdd_remaining,64
+hdd_init_directory:
+        call    hdd_write_sector
+        jc      hdd_init_fail
+        call    hdd_advance
+        dec     Word Ptr hdd_remaining
+        jnz     hdd_init_directory
+        clc
+        ret
+hdd_init_fail:
+        stc
+        ret
+
+hdd_advance:
+        inc     Byte Ptr hdd_sector
+        cmp     Byte Ptr hdd_sector,HDD_SPT
+        jb      hdd_advance_done
+        mov     Byte Ptr hdd_sector,0
+        inc     Byte Ptr hdd_head
+        mov     al,Byte Ptr hdd_head
+        cmp     al,Byte Ptr hdd_heads
+        jb      hdd_advance_done
+        mov     Byte Ptr hdd_head,0
+        inc     Word Ptr hdd_cyl
+hdd_advance_done:
+        ret
+
+hdd_write_sector:
+        mov     Byte Ptr hdd_rw,1
+        call    hdd_sector_io
+        ret
+
+hdd_sector_io:
+        push    ax
+        push    bx
+        push    cx
+        push    dx
+        push    si
+        push    di
+        push    es
+        ; Validate geometry and write only an in-range CHS sector.
+        mov     ax,Word Ptr hdd_cyl
+        cmp     ax,Word Ptr hdd_cylinders
+        jb      hdd_chs_cyl_ok
+        jmp     hdd_io_bad
+hdd_chs_cyl_ok:
+        mov     al,Byte Ptr hdd_head
+        cmp     al,Byte Ptr hdd_heads
+        jb      hdd_chs_head_ok
+        jmp     hdd_io_bad
+hdd_chs_head_ok:
+        cmp     Byte Ptr hdd_sector,HDD_SPT
+        jb      hdd_chs_ok
+        jmp     hdd_io_bad
+hdd_chs_ok:
+        ; Two adjacent 256-byte DSEG buffers: choose safe DMA page.
+        mov     Word Ptr hdd_dma_ptr,offset sectorbuf
+        mov     ax,ds
+        mov     bx,16
+        mul     bx
+        add     ax,offset sectorbuf
+        adc     dx,0
+        cmp     ax,0ff00h
+        jbe     hdd_buf_safe
+        mov     Word Ptr hdd_dma_ptr,offset hdd_bounce
+        mov     ax,ds
+        mov     bx,16
+        mul     bx
+        add     ax,offset hdd_bounce
+        adc     dx,0
+        cmp     ax,0ff00h
+        ja      hdd_io_bad
+hdd_buf_safe:
+        cmp     dx,15
+        ja      hdd_io_bad
+        mov     Word Ptr hdd_dma_addr,ax
+        mov     Byte Ptr hdd_dma_bank,dl
+        cmp     Byte Ptr hdd_rw,0
+        je      hdd_setup_dma
+        push    ds
+        pop     es
+        mov     si,offset sectorbuf
+        mov     di,Word Ptr hdd_dma_ptr
+        mov     cx,128
+        cld
+        rep     movsw
+hdd_setup_dma:
+        ; Channel 2: address 14h, count 15h, bank 22h.
+        mov     dx,01ah
+        mov     al,6
+        out     dx,al
+        mov     dx,01ch
+        xor     al,al
+        out     dx,al
+        mov     dx,014h
+        mov     ax,Word Ptr hdd_dma_addr
+        out     dx,al
+        mov     al,ah
+        out     dx,al
+        mov     dx,015h
+        mov     al,0ffh
+        out     dx,al
+        xor     al,al
+        out     dx,al
+        mov     dx,022h
+        mov     al,Byte Ptr hdd_dma_bank
+        out     dx,al
+        mov     dx,01bh
+        mov     al,046h
+        cmp     Byte Ptr hdd_rw,0
+        je      hdd_mode_ready
+        mov     al,04ah
+hdd_mode_ready:
+        out     dx,al
+        mov     dx,018h
+        in      al,dx
+        mov     dx,01ah
+        mov     al,2
+        out     dx,al
+        ; MDC CHS WRITE command, parameters C/H/S and 256 bytes.
+        mov     dx,0fdc0h
+        mov     al,023h
+        cmp     Byte Ptr hdd_rw,0
+        jne     hdd_command_ready
+        mov     al,022h
+hdd_command_ready:
+        out     dx,al
+        mov     dx,0fdc1h
+        xor     al,al
+        out     dx,al              ; drive zero
+        out     dx,al              ; unused
+        mov     ax,Word Ptr hdd_cyl
+        mov     al,ah
+        out     dx,al              ; cylinder high
+        mov     ax,Word Ptr hdd_cyl
+        out     dx,al              ; cylinder low
+        mov     al,Byte Ptr hdd_head
+        out     dx,al
+        mov     al,Byte Ptr hdd_sector
+        out     dx,al
+        mov     al,1
+        out     dx,al              ; transfer 0100h bytes
+        xor     al,al
+        out     dx,al
+        call    hdd_result_wait
+        jc      hdd_io_bad
+        mov     dx,018h
+        in      al,dx
+        test    al,4
+        jz      hdd_io_bad
+        cmp     Byte Ptr hdd_rw,0
+        jne     hdd_io_ok
+        push    ds
+        pop     es
+        mov     si,Word Ptr hdd_dma_ptr
+        mov     di,offset sectorbuf
+        mov     cx,128
+        cld
+        rep     movsw
+hdd_io_ok:
+        clc
+        jmp     hdd_io_exit
+hdd_io_bad:
+        stc
+hdd_io_exit:
+        pushf
+        mov     dx,01ah
+        mov     al,6
+        out     dx,al
+        popf
+        pop     es
+        pop     di
+        pop     si
+        pop     dx
+        pop     cx
+        pop     bx
+        pop     ax
+        ret
+
+puts:
+        mov     cl,9
+        int     BDOSINT
+        ret
+putc:
+        push    bx
+        push    cx
+        push    dx
+        mov     dl,al
+        mov     cl,2
+        int     BDOSINT
+        pop     dx
+        pop     cx
+        pop     bx
+        ret
+crlf:
+        mov     al,0dh
+        call    putc
+        mov     al,0ah
+        call    putc
+        ret
+hex8:
+        push    ax
+        push    cx
+        mov     cl,4
+        shr     al,cl
+        call    hex_nibble
+        pop     cx
+        pop     ax
+        push    ax
+        and     al,0fh
+        call    hex_nibble
+        pop     ax
+        ret
+hex_nibble:
+        add     al,'0'
+        cmp     al,'9'
+        ja     FDF_SKIP_071
+        jmp     hn_out
+FDF_SKIP_071:
+        add     al,7
+hn_out:
+        jmp     putc
+
+dseg
+org     100h
+
+target_drive    db      0ffh
+source_drive    db      0ffh
+mode            db      MODE_DATA
+io_drive        db      0
+io_unit         db      0
+io_channel      db      0
+cylinders       db      40
+sectors_per_side db     16
+io_cyl          db      0
+io_head         db      0
+io_sector       db      1
+io_write        db      0
+io_size         dw      256
+image_offset    dw      0
+remaining       dw      0
+dma_ptr         dw      0
+dma_length      dw      0
+dma_command     db      0
+dma_write       db      0
+track_ptr       dw      0
+track_length    dw      0
+fmt_secbytes    dw      256
+fmt_n           db      1
+hdd_cyl         dw      0
+hdd_remaining   dw      0
+hdd_cylinders   dw      0
+hdd_heads       db      0
+hdd_head        db      0
+hdd_sector      db      0
+hdd_rw          db      0
+hdd_dma_ptr     dw      0
+hdd_dma_addr    dw      0
+hdd_dma_bank    db      0
+hdd_result      rs      10
+hdd_bounce      rs      256
+
+
+msg_title       db      0dh,0ah,'FM-11 CP/M-86 FORMAT',0dh,0ah,'
+msg_usage       db      'Usage: FORMAT A:..I: or FORMAT HDD [/S|/L]',0dh,0ah
+                db      'HDD=I: whole disk; /S and /L for floppy only',0dh,0ah,'
+msg_target      db      'Target drive: $'
+msg_warning     db      'WARNING: all target data will be destroyed!',0dh,0ah
+                db      'Continue (Y/N)? $'
+msg_abort       db      0dh,0ah,'Aborted.',0dh,0ah,'$'
+msg_source_error db     'Cannot read source system disk.',0dh,0ah,'$'
+msg_patch_error db      'Unknown CBIOS INIT; target unchanged.',0dh,0ah,'$'
+msg_format      db      'Physical WRITE TRACK formatting...',0dh,0ah,'$'
+msg_install     db      'Installing IPL and clean resident image...',0dh,0ah,'$'
+msg_io_error    db      'Disk I/O or format failed at C/H/S= $'
+msg_done_data   db      'Data disk physical format complete.',0dh,0ah,'$'
+msg_done_system db      'Bootable system disk physical format complete.',0dh,0ah,'$'
+msg_done_low    db      'Physical format complete (/L).',0dh,0ah,'$'
+
+INCLUDE FDIPL2D.INC
+INCLUDE FDIPL2HD.INC
+
+sectorbuf       rs      256
+system_image    rs      03e00h
+; Two alternative 10,900-byte DMA regions; select one that stays
+; within a physical 64-KiB DMA page.
+track_area      rs      FMT_MAX+FMT_ALT
+local_stack     rs      1024
+local_stack_top db      0
+end
+
+msg_target      db      'Target drive: $'
+msg_warning     db      'WARNING: all target data will be destroyed!',0dh,0ah
+                db      'Continue (Y/N)? $'
+msg_abort       db      0dh,0ah,'Aborted.',0dh,0ah,'$'
+msg_source_error db     'Cannot read source system disk.',0dh,0ah,'$'
+msg_patch_error db      'Unknown CBIOS INIT; target unchanged.',0dh,0ah,'$'
+msg_format      db      'Physical WRITE TRACK formatting...',0dh,0ah,'$'
+msg_install     db      'Installing IPL and clean resident image...',0dh,0ah,'$'
+msg_io_error    db      'Disk I/O or format failed at C/H/S= $'
+msg_done_data   db      'Data disk physical format complete.',0dh,0ah,'$'
+msg_done_system db      'Bootable system disk physical format complete.',0dh,0ah,'$'
+msg_done_low    db      'Physical format complete (/L).',0dh,0ah,'$'
+
+INCLUDE FDIPL2D.INC
+INCLUDE FDIPL2HD.INC
+
+sectorbuf       rs      256
+system_image    rs      03e00h
+; Two alternative 10,900-byte DMA regions; select one that stays
+; within a physical 64-KiB DMA page.
+track_area      rs      FMT_MAX+FMT_ALT
+local_stack     rs      1024
+local_stack_top db      0
+end
+
+msg_hdd_name    db      'HDD
+msg_usage       db      'Usage: FORMAT A:..I: or FORMAT HDD [/S|/L]',0dh,0ah
+                db      'HDD=I: whole disk; /S and /L for floppy only',0dh,0ah,'
+msg_target      db      'Target drive: $'
+msg_warning     db      'WARNING: all target data will be destroyed!',0dh,0ah
+                db      'Continue (Y/N)? $'
+msg_abort       db      0dh,0ah,'Aborted.',0dh,0ah,'$'
+msg_source_error db     'Cannot read source system disk.',0dh,0ah,'$'
+msg_patch_error db      'Unknown CBIOS INIT; target unchanged.',0dh,0ah,'$'
+msg_format      db      'Physical WRITE TRACK formatting...',0dh,0ah,'$'
+msg_install     db      'Installing IPL and clean resident image...',0dh,0ah,'$'
+msg_io_error    db      'Disk I/O or format failed at C/H/S= $'
+msg_done_data   db      'Data disk physical format complete.',0dh,0ah,'$'
+msg_done_system db      'Bootable system disk physical format complete.',0dh,0ah,'$'
+msg_done_low    db      'Physical format complete (/L).',0dh,0ah,'$'
+
+INCLUDE FDIPL2D.INC
+INCLUDE FDIPL2HD.INC
+
+sectorbuf       rs      256
+system_image    rs      03e00h
+; Two alternative 10,900-byte DMA regions; select one that stays
+; within a physical 64-KiB DMA page.
+track_area      rs      FMT_MAX+FMT_ALT
+local_stack     rs      1024
+local_stack_top db      0
+end
+
+msg_target      db      'Target drive: $'
+msg_warning     db      'WARNING: all target data will be destroyed!',0dh,0ah
+                db      'Continue (Y/N)? $'
+msg_abort       db      0dh,0ah,'Aborted.',0dh,0ah,'$'
+msg_source_error db     'Cannot read source system disk.',0dh,0ah,'$'
+msg_patch_error db      'Unknown CBIOS INIT; target unchanged.',0dh,0ah,'$'
+msg_format      db      'Physical WRITE TRACK formatting...',0dh,0ah,'$'
+msg_install     db      'Installing IPL and clean resident image...',0dh,0ah,'$'
+msg_io_error    db      'Disk I/O or format failed at C/H/S= $'
+msg_done_data   db      'Data disk physical format complete.',0dh,0ah,'$'
+msg_done_system db      'Bootable system disk physical format complete.',0dh,0ah,'$'
+msg_done_low    db      'Physical format complete (/L).',0dh,0ah,'$'
+
+INCLUDE FDIPL2D.INC
+INCLUDE FDIPL2HD.INC
+
+sectorbuf       rs      256
+system_image    rs      03e00h
+; Two alternative 10,900-byte DMA regions; select one that stays
+; within a physical 64-KiB DMA page.
+track_area      rs      FMT_MAX+FMT_ALT
+local_stack     rs      1024
+local_stack_top db      0
+end
+
+msg_hdd_options db      'HDD /S and /L require HDD CBIOS/IPL support.',0dh,0ah,'
+msg_usage       db      'Usage: FORMAT A:..I: or FORMAT HDD [/S|/L]',0dh,0ah
+                db      'HDD=I: whole disk; /S and /L for floppy only',0dh,0ah,'
+msg_target      db      'Target drive: $'
+msg_warning     db      'WARNING: all target data will be destroyed!',0dh,0ah
+                db      'Continue (Y/N)? $'
+msg_abort       db      0dh,0ah,'Aborted.',0dh,0ah,'$'
+msg_source_error db     'Cannot read source system disk.',0dh,0ah,'$'
+msg_patch_error db      'Unknown CBIOS INIT; target unchanged.',0dh,0ah,'$'
+msg_format      db      'Physical WRITE TRACK formatting...',0dh,0ah,'$'
+msg_install     db      'Installing IPL and clean resident image...',0dh,0ah,'$'
+msg_io_error    db      'Disk I/O or format failed at C/H/S= $'
+msg_done_data   db      'Data disk physical format complete.',0dh,0ah,'$'
+msg_done_system db      'Bootable system disk physical format complete.',0dh,0ah,'$'
+msg_done_low    db      'Physical format complete (/L).',0dh,0ah,'$'
+
+INCLUDE FDIPL2D.INC
+INCLUDE FDIPL2HD.INC
+
+sectorbuf       rs      256
+system_image    rs      03e00h
+; Two alternative 10,900-byte DMA regions; select one that stays
+; within a physical 64-KiB DMA page.
+track_area      rs      FMT_MAX+FMT_ALT
+local_stack     rs      1024
+local_stack_top db      0
+end
+
+msg_target      db      'Target drive: $'
+msg_warning     db      'WARNING: all target data will be destroyed!',0dh,0ah
+                db      'Continue (Y/N)? $'
+msg_abort       db      0dh,0ah,'Aborted.',0dh,0ah,'$'
+msg_source_error db     'Cannot read source system disk.',0dh,0ah,'$'
+msg_patch_error db      'Unknown CBIOS INIT; target unchanged.',0dh,0ah,'$'
+msg_format      db      'Physical WRITE TRACK formatting...',0dh,0ah,'$'
+msg_install     db      'Installing IPL and clean resident image...',0dh,0ah,'$'
+msg_io_error    db      'Disk I/O or format failed at C/H/S= $'
+msg_done_data   db      'Data disk physical format complete.',0dh,0ah,'$'
+msg_done_system db      'Bootable system disk physical format complete.',0dh,0ah,'$'
+msg_done_low    db      'Physical format complete (/L).',0dh,0ah,'$'
+
+INCLUDE FDIPL2D.INC
+INCLUDE FDIPL2HD.INC
+
+sectorbuf       rs      256
+system_image    rs      03e00h
+; Two alternative 10,900-byte DMA regions; select one that stays
+; within a physical 64-KiB DMA page.
+track_area      rs      FMT_MAX+FMT_ALT
+local_stack     rs      1024
+local_stack_top db      0
+end
+
+msg_hdd_format  db      'Initializing whole MDC HDD: reserved cylinder and directory...',0dh,0ah,'
+msg_usage       db      'Usage: FORMAT A:..I: or FORMAT HDD [/S|/L]',0dh,0ah
+                db      'HDD=I: whole disk; /S and /L for floppy only',0dh,0ah,'
+msg_target      db      'Target drive: $'
+msg_warning     db      'WARNING: all target data will be destroyed!',0dh,0ah
+                db      'Continue (Y/N)? $'
+msg_abort       db      0dh,0ah,'Aborted.',0dh,0ah,'$'
+msg_source_error db     'Cannot read source system disk.',0dh,0ah,'$'
+msg_patch_error db      'Unknown CBIOS INIT; target unchanged.',0dh,0ah,'$'
+msg_format      db      'Physical WRITE TRACK formatting...',0dh,0ah,'$'
+msg_install     db      'Installing IPL and clean resident image...',0dh,0ah,'$'
+msg_io_error    db      'Disk I/O or format failed at C/H/S= $'
+msg_done_data   db      'Data disk physical format complete.',0dh,0ah,'$'
+msg_done_system db      'Bootable system disk physical format complete.',0dh,0ah,'$'
+msg_done_low    db      'Physical format complete (/L).',0dh,0ah,'$'
+
+INCLUDE FDIPL2D.INC
+INCLUDE FDIPL2HD.INC
+
+sectorbuf       rs      256
+system_image    rs      03e00h
+; Two alternative 10,900-byte DMA regions; select one that stays
+; within a physical 64-KiB DMA page.
+track_area      rs      FMT_MAX+FMT_ALT
+local_stack     rs      1024
+local_stack_top db      0
+end
+
+msg_target      db      'Target drive: $'
+msg_warning     db      'WARNING: all target data will be destroyed!',0dh,0ah
+                db      'Continue (Y/N)? $'
+msg_abort       db      0dh,0ah,'Aborted.',0dh,0ah,'$'
+msg_source_error db     'Cannot read source system disk.',0dh,0ah,'$'
+msg_patch_error db      'Unknown CBIOS INIT; target unchanged.',0dh,0ah,'$'
+msg_format      db      'Physical WRITE TRACK formatting...',0dh,0ah,'$'
+msg_install     db      'Installing IPL and clean resident image...',0dh,0ah,'$'
+msg_io_error    db      'Disk I/O or format failed at C/H/S= $'
+msg_done_data   db      'Data disk physical format complete.',0dh,0ah,'$'
+msg_done_system db      'Bootable system disk physical format complete.',0dh,0ah,'$'
+msg_done_low    db      'Physical format complete (/L).',0dh,0ah,'$'
+
+INCLUDE FDIPL2D.INC
+INCLUDE FDIPL2HD.INC
+
+sectorbuf       rs      256
+system_image    rs      03e00h
+; Two alternative 10,900-byte DMA regions; select one that stays
+; within a physical 64-KiB DMA page.
+track_area      rs      FMT_MAX+FMT_ALT
+local_stack     rs      1024
+local_stack_top db      0
+end
+
+msg_hdd_done    db      'HDD directory initialized. CBIOS I: support is not installed.',0dh,0ah,'
+msg_usage       db      'Usage: FORMAT A:..I: or FORMAT HDD [/S|/L]',0dh,0ah
+                db      'HDD=I: whole disk; /S and /L for floppy only',0dh,0ah,'
+msg_target      db      'Target drive: $'
+msg_warning     db      'WARNING: all target data will be destroyed!',0dh,0ah
+                db      'Continue (Y/N)? $'
+msg_abort       db      0dh,0ah,'Aborted.',0dh,0ah,'$'
+msg_source_error db     'Cannot read source system disk.',0dh,0ah,'$'
+msg_patch_error db      'Unknown CBIOS INIT; target unchanged.',0dh,0ah,'$'
+msg_format      db      'Physical WRITE TRACK formatting...',0dh,0ah,'$'
+msg_install     db      'Installing IPL and clean resident image...',0dh,0ah,'$'
+msg_io_error    db      'Disk I/O or format failed at C/H/S= $'
+msg_done_data   db      'Data disk physical format complete.',0dh,0ah,'$'
+msg_done_system db      'Bootable system disk physical format complete.',0dh,0ah,'$'
+msg_done_low    db      'Physical format complete (/L).',0dh,0ah,'$'
+
+INCLUDE FDIPL2D.INC
+INCLUDE FDIPL2HD.INC
+
+sectorbuf       rs      256
+system_image    rs      03e00h
+; Two alternative 10,900-byte DMA regions; select one that stays
+; within a physical 64-KiB DMA page.
+track_area      rs      FMT_MAX+FMT_ALT
+local_stack     rs      1024
+local_stack_top db      0
+end
+
+msg_target      db      'Target drive: $'
+msg_warning     db      'WARNING: all target data will be destroyed!',0dh,0ah
+                db      'Continue (Y/N)? $'
+msg_abort       db      0dh,0ah,'Aborted.',0dh,0ah,'$'
+msg_source_error db     'Cannot read source system disk.',0dh,0ah,'$'
+msg_patch_error db      'Unknown CBIOS INIT; target unchanged.',0dh,0ah,'$'
+msg_format      db      'Physical WRITE TRACK formatting...',0dh,0ah,'$'
+msg_install     db      'Installing IPL and clean resident image...',0dh,0ah,'$'
+msg_io_error    db      'Disk I/O or format failed at C/H/S= $'
+msg_done_data   db      'Data disk physical format complete.',0dh,0ah,'$'
+msg_done_system db      'Bootable system disk physical format complete.',0dh,0ah,'$'
+msg_done_low    db      'Physical format complete (/L).',0dh,0ah,'$'
+
+INCLUDE FDIPL2D.INC
+INCLUDE FDIPL2HD.INC
+
+sectorbuf       rs      256
+system_image    rs      03e00h
+; Two alternative 10,900-byte DMA regions; select one that stays
+; within a physical 64-KiB DMA page.
+track_area      rs      FMT_MAX+FMT_ALT
+local_stack     rs      1024
+local_stack_top db      0
+end
+
+msg_hdd_error   db      'HDD sense or sector write failed; filesystem may be incomplete.',0dh,0ah,'
+msg_usage       db      'Usage: FORMAT A:..I: or FORMAT HDD [/S|/L]',0dh,0ah
+                db      'HDD=I: whole disk; /S and /L for floppy only',0dh,0ah,'
+msg_target      db      'Target drive: $'
+msg_warning     db      'WARNING: all target data will be destroyed!',0dh,0ah
+                db      'Continue (Y/N)? $'
+msg_abort       db      0dh,0ah,'Aborted.',0dh,0ah,'$'
+msg_source_error db     'Cannot read source system disk.',0dh,0ah,'$'
+msg_patch_error db      'Unknown CBIOS INIT; target unchanged.',0dh,0ah,'$'
+msg_format      db      'Physical WRITE TRACK formatting...',0dh,0ah,'$'
+msg_install     db      'Installing IPL and clean resident image...',0dh,0ah,'$'
+msg_io_error    db      'Disk I/O or format failed at C/H/S= $'
+msg_done_data   db      'Data disk physical format complete.',0dh,0ah,'$'
+msg_done_system db      'Bootable system disk physical format complete.',0dh,0ah,'$'
+msg_done_low    db      'Physical format complete (/L).',0dh,0ah,'$'
+
+INCLUDE FDIPL2D.INC
+INCLUDE FDIPL2HD.INC
+
+sectorbuf       rs      256
+system_image    rs      03e00h
+; Two alternative 10,900-byte DMA regions; select one that stays
+; within a physical 64-KiB DMA page.
+track_area      rs      FMT_MAX+FMT_ALT
+local_stack     rs      1024
+local_stack_top db      0
+end
+
+msg_target      db      'Target drive: $'
+msg_warning     db      'WARNING: all target data will be destroyed!',0dh,0ah
+                db      'Continue (Y/N)? $'
+msg_abort       db      0dh,0ah,'Aborted.',0dh,0ah,'$'
+msg_source_error db     'Cannot read source system disk.',0dh,0ah,'$'
+msg_patch_error db      'Unknown CBIOS INIT; target unchanged.',0dh,0ah,'$'
+msg_format      db      'Physical WRITE TRACK formatting...',0dh,0ah,'$'
+msg_install     db      'Installing IPL and clean resident image...',0dh,0ah,'$'
+msg_io_error    db      'Disk I/O or format failed at C/H/S= $'
+msg_done_data   db      'Data disk physical format complete.',0dh,0ah,'$'
+msg_done_system db      'Bootable system disk physical format complete.',0dh,0ah,'$'
+msg_done_low    db      'Physical format complete (/L).',0dh,0ah,'$'
+
+INCLUDE FDIPL2D.INC
+INCLUDE FDIPL2HD.INC
+
+sectorbuf       rs      256
+system_image    rs      03e00h
+; Two alternative 10,900-byte DMA regions; select one that stays
+; within a physical 64-KiB DMA page.
+track_area      rs      FMT_MAX+FMT_ALT
+local_stack     rs      1024
+local_stack_top db      0
+end
+
+msg_usage       db      'Usage: FORMAT A:..I: or FORMAT HDD [/S|/L]',0dh,0ah
+                db      'HDD=I: whole disk; /S and /L for floppy only',0dh,0ah,'
+msg_target      db      'Target drive: $'
+msg_warning     db      'WARNING: all target data will be destroyed!',0dh,0ah
+                db      'Continue (Y/N)? $'
+msg_abort       db      0dh,0ah,'Aborted.',0dh,0ah,'$'
+msg_source_error db     'Cannot read source system disk.',0dh,0ah,'$'
+msg_patch_error db      'Unknown CBIOS INIT; target unchanged.',0dh,0ah,'$'
+msg_format      db      'Physical WRITE TRACK formatting...',0dh,0ah,'$'
+msg_install     db      'Installing IPL and clean resident image...',0dh,0ah,'$'
+msg_io_error    db      'Disk I/O or format failed at C/H/S= $'
+msg_done_data   db      'Data disk physical format complete.',0dh,0ah,'$'
+msg_done_system db      'Bootable system disk physical format complete.',0dh,0ah,'$'
+msg_done_low    db      'Physical format complete (/L).',0dh,0ah,'$'
+
+INCLUDE FDIPL2D.INC
+INCLUDE FDIPL2HD.INC
+
+sectorbuf       rs      256
+system_image    rs      03e00h
+; Two alternative 10,900-byte DMA regions; select one that stays
+; within a physical 64-KiB DMA page.
+track_area      rs      FMT_MAX+FMT_ALT
+local_stack     rs      1024
+local_stack_top db      0
+end
+
+msg_target      db      'Target drive: $'
+msg_warning     db      'WARNING: all target data will be destroyed!',0dh,0ah
+                db      'Continue (Y/N)? $'
+msg_abort       db      0dh,0ah,'Aborted.',0dh,0ah,'$'
+msg_source_error db     'Cannot read source system disk.',0dh,0ah,'$'
+msg_patch_error db      'Unknown CBIOS INIT; target unchanged.',0dh,0ah,'$'
+msg_format      db      'Physical WRITE TRACK formatting...',0dh,0ah,'$'
+msg_install     db      'Installing IPL and clean resident image...',0dh,0ah,'$'
+msg_io_error    db      'Disk I/O or format failed at C/H/S= $'
+msg_done_data   db      'Data disk physical format complete.',0dh,0ah,'$'
+msg_done_system db      'Bootable system disk physical format complete.',0dh,0ah,'$'
+msg_done_low    db      'Physical format complete (/L).',0dh,0ah,'$'
+
+INCLUDE FDIPL2D.INC
+INCLUDE FDIPL2HD.INC
+
+sectorbuf       rs      256
+system_image    rs      03e00h
+; Two alternative 10,900-byte DMA regions; select one that stays
+; within a physical 64-KiB DMA page.
+track_area      rs      FMT_MAX+FMT_ALT
+local_stack     rs      1024
+local_stack_top db      0
+end
+
