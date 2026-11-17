@@ -14,11 +14,16 @@ command to switch the console without rebuilding or rebooting:
 ```text
 STAT CON:=TTY:     ; USART0 serial input/output
 STAT CON:=CRT:     ; FM-11 local keyboard and display
-STAT CON:=UC1:     ; local keyboard input, output to both CRT and TTY
+STAT CON:=UC1:     ; input from both local keyboard and USART0; mirrored output
 ```
 
 `STAT CON:` can display the current console assignment (if supported
-by the supplied STAT.COM/CMD). UC1 is an FM-11-specific extension of
+by the supplied STAT.COM/CMD). UC1 accepts keys from both the local
+keyboard and USART0, polling both without blocking on an idle source.
+When both have pending input, it alternates which source has priority
+so neither is permanently starved. Independently arriving characters
+are returned as a single console stream and may interleave. UC1 is an
+FM-11-specific extension of
 the otherwise standard IOBYTE CON field. With UC1, serial output is
 best-effort with a bounded transmitter wait to avoid an absent serial
 terminal blocking the local display. `BAT:` (the fourth IOBYTE CON
