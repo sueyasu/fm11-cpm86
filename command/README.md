@@ -22,10 +22,13 @@ emulator WRITE TRACK implementation.
 
 All commands require explicit confirmation and **destroy the entire
 target disk**. The source system resident (0x3E00 bytes) is read
-and checked from the matching A: or E: system disk **before** the
-target is overwritten; a 2D source may install only on another 2D
-disk, and a 2HD source only on 2HD. The resident comes from disk,
-never from the live in-memory CCP/BDOS.
+and checked from the **current A: or E: drive** before the target
+is overwritten. Unlike the earlier implementation, a running E:
+(2HD) system may make a 2D boot disk, and a running A: (2D) system
+may make a 2HD boot disk. The /S path validates the existing CBIOS
+INIT code and adjusts its cold-boot drive to A: or E: in the saved
+image. Unknown CBIOS layouts are rejected before formatting. The
+resident comes from disk, never from the live in-memory CCP/BDOS.
 
 The current implementation intentionally accepts only the native
 40x2x16x256 (2D) and 77x2x26x256 (2HD, with C0/H0 128-byte FM)
