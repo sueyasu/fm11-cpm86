@@ -75,8 +75,8 @@ FDF_SKIP_003:
 confirmed:
         call    crlf
         ; Save a clean source resident before modifying target media.
-        ; The source must be the system drive (A: or E:) for the
-        ; matching CBIOS build; do not copy the currently executing RAM.
+        ; The source must have a readable system image in A: or E:.
+        ; Do not copy the currently executing RAM.
         cmp     Byte Ptr mode,MODE_SYSTEM
         je     FDF_SKIP_004
         jmp     target_ready
@@ -89,6 +89,15 @@ FDF_SKIP_005:
         jnc     FDF_SKIP_006
         jmp     source_failed
 FDF_SKIP_006:
+        ; The resident source may be E: while the destination is 2D,
+        ; or A: while the destination is 2HD. Rebind the cold boot
+        ; drive in the saved image before overwriting any target media.
+        call    patch_system_boot_drive
+        jnc     fdf_boot_patched
+        mov     dx,offset msg_patch_error
+        call    puts
+        jmp     exit_program
+fdf_boot_patched:
         jmp     target_ready
 source_failed:
         mov     dx,offset msg_source_error
@@ -265,10 +274,9 @@ FDF_SKIP_027:
 up_done:
         ret
 
-; Read the BDOS source drive, not CCP's transient current drive.
-; CBIOS is compiled with boot drive A: for 2D or E: for 2HD.
-; Refuse cross-family installation: the resident INIT boot drive
-; must match the physical FDC family used by its IPL.
+; Read the BDOS source drive. CP/M-86 supports both physical FDC
+; families in the same CBIOS, so /S may copy from A: to 2HD or
+; E: to 2D. The copied INIT boot drive is patched after READ.
 find_source:
         ; ASM86 1.1 cannot use an absolute EQU as [displacement].
         ; Select the resident segment, then use BX for the address.
@@ -291,23 +299,6 @@ FDF_SKIP_028:
 FDF_SKIP_029:
 fs_source_ok:
         mov     Byte Ptr source_drive,al
-        mov     bl,al
-        mov     al,Byte Ptr target_drive
-        cmp     al,4
-        jae     FDF_SKIP_030
-        jmp     fs_target_2d
-FDF_SKIP_030:
-        cmp     bl,4
-        je     FDF_SKIP_031
-        jmp     fs_source_bad
-FDF_SKIP_031:
-        clc
-        ret
-fs_target_2d:
-        cmp     bl,0
-        je     FDF_SKIP_032
-        jmp     fs_source_bad
-FDF_SKIP_032:
         clc
         ret
 fs_source_bad:
@@ -382,6 +373,60 @@ FDF_SKIP_036:
         clc
         ret
 sr_error:
+        stc
+        ret
+
+; CBIOS uses one common 0x3E00-byte resident for both FDC families.
+; The source image's INIT begins at the first CBIOS JMP vector's target.
+; In the established CBIOS ABI its cold-drive initialization is:
+;   B9 <drive> 00   MOV CX,BOOT_DRIVE
+;   88 0E xx xx     MOV [cur_disk],CL
+;   88 0E B7 24     MOV [024B7h],CL   (BDOS CURDRV)
+; Locate and validate the complete signature within the first 96 bytes
+; of INIT. Only the immediate low byte is changed. This supports
+; existing 2D and 2HD resident images; an unexpected CBIOS fails
+; safely before the target disk is changed.
+patch_system_boot_drive:
+        mov     si,offset system_image+02500h
+        cmp     Byte Ptr [si],0e9h
+        jne     ps_bad
+        mov     bx,[si+1]
+        add     bx,02503h
+        add     bx,offset system_image
+        mov     si,bx
+        mov     cx,96
+ps_scan:
+        cmp     Byte Ptr [si],0b9h
+        jne     ps_next
+        mov     al,[si+1]
+        cmp     al,0
+        je      ps_candidate
+        cmp     al,4
+        jne     ps_next
+ps_candidate:
+        cmp     Byte Ptr [si+2],0
+        jne     ps_next
+        cmp     Byte Ptr [si+3],088h
+        jne     ps_next
+        cmp     Byte Ptr [si+4],00eh
+        jne     ps_next
+        cmp     Byte Ptr [si+7],088h
+        jne     ps_next
+        cmp     Byte Ptr [si+8],00eh
+        jne     ps_next
+        cmp     Byte Ptr [si+9],0b7h
+        jne     ps_next
+        cmp     Byte Ptr [si+10],024h
+        jne     ps_next
+        mov     al,Byte Ptr target_drive
+        and     al,4
+        mov     [si+1],al
+        clc
+        ret
+ps_next:
+        inc     si
+        loop    ps_scan
+ps_bad:
         stc
         ret
 
@@ -966,7 +1011,46 @@ msg_target      db      'Target drive: $'
 msg_warning     db      'WARNING: all target data will be destroyed!',0dh,0ah
                 db      'Continue (Y/N)? $'
 msg_abort       db      0dh,0ah,'Aborted.',0dh,0ah,'$'
-msg_source_error db     'Cannot read matching A:/E: system resident; disk unchanged.',0dh,0ah,'$'
+msg_source_error db     'Cannot read system resident from current A:/E:; disk unchanged.',0dh,0ah,'
+msg_format      db      'Physical WRITE TRACK formatting...',0dh,0ah,'$'
+msg_install     db      'Installing IPL and clean resident image...',0dh,0ah,'$'
+msg_io_error    db      'Disk I/O or format failed at C/H/S= $'
+msg_done_data   db      'Data disk physical format complete.',0dh,0ah,'$'
+msg_done_system db      'Bootable system disk physical format complete.',0dh,0ah,'$'
+msg_done_low    db      'Physical format complete (/L).',0dh,0ah,'$'
+
+INCLUDE FDIPL2D.INC
+INCLUDE FDIPL2HD.INC
+
+sectorbuf       rs      256
+system_image    rs      03e00h
+; Two alternative 10,900-byte DMA regions; select one that stays
+; within a physical 64-KiB DMA page.
+track_area      rs      FMT_MAX+FMT_ALT
+local_stack     rs      1024
+local_stack_top db      0
+end
+
+msg_patch_error db      'Unknown CBIOS INIT layout; cannot change boot drive.',0dh,0ah,'
+msg_format      db      'Physical WRITE TRACK formatting...',0dh,0ah,'$'
+msg_install     db      'Installing IPL and clean resident image...',0dh,0ah,'$'
+msg_io_error    db      'Disk I/O or format failed at C/H/S= $'
+msg_done_data   db      'Data disk physical format complete.',0dh,0ah,'$'
+msg_done_system db      'Bootable system disk physical format complete.',0dh,0ah,'$'
+msg_done_low    db      'Physical format complete (/L).',0dh,0ah,'$'
+
+INCLUDE FDIPL2D.INC
+INCLUDE FDIPL2HD.INC
+
+sectorbuf       rs      256
+system_image    rs      03e00h
+; Two alternative 10,900-byte DMA regions; select one that stays
+; within a physical 64-KiB DMA page.
+track_area      rs      FMT_MAX+FMT_ALT
+local_stack     rs      1024
+local_stack_top db      0
+end
+
 msg_format      db      'Physical WRITE TRACK formatting...',0dh,0ah,'$'
 msg_install     db      'Installing IPL and clean resident image...',0dh,0ah,'$'
 msg_io_error    db      'Disk I/O or format failed at C/H/S= $'
