@@ -139,11 +139,9 @@ INIT:
 %endif
 
 WBOOT:
-    push ds
-    push cs
-    pop ds
-    call cache_flush_all
-    pop ds
+    ; Use the same public cache synchronization service as direct-I/O
+    ; utilities. It saves/restores the caller's DS and returns CF.
+    call CACHE_SYNC
     jc .sync_failed
     jmp 0x0006           ; provisional: disk reload not implemented
 .sync_failed:
@@ -950,6 +948,43 @@ mrt_tpa_len:
 local_hello db 'FM-11 CP/M-86 local console',13,10,0
 %include "src/cbios_local_console.inc"
 %include "src/cbios_ansi.inc"
+
+; Private, fixed-offset FAR-call ABI compatible with PC-9801 CP/M-86.
+; BIOS resides at 0400:2500, so API offsets are resident-system offsets.
+CACHE_SYNC_OFS  equ 0x3DD8
+CACHE_RESET_OFS equ 0x3DDC
+
+; Entry from transient CMDs or WBOOT: caller's DS can point to DSEG.
+; Keep all general registers and DS; CF=1 if any write-back failed.
+CACHE_SYNC:
+    push ds
+    push cs
+    pop ds
+    call cache_flush_all
+    pop ds
+    ret
+
+; Never invalidate dirty data after a failed write-back.
+CACHE_RESET:
+    push ds
+    push cs
+    pop ds
+    call cache_flush_all
+    jc .failed
+    call cache_invalidate
+    clc
+.failed:
+    pop ds
+    ret
+
+; Keep the same 4-byte CALL near/RETF stubs as the PC-9801 BIOS.
+; The fixed offsets are relative to the complete 0400:0000 resident,
+; whose 0x2500-byte CCP/BDOS core precedes this 0x1900-byte CBIOS.
+times (CACHE_SYNC_OFS - 0x2500) - ($ - bios_start) db 0
+    call CACHE_SYNC
+    retf
+    call CACHE_RESET
+    retf
 
 ; Pad the CBIOS itself (not the optional 0x2500-byte preceding core).
 times BIOS_SIZE - ($ - bios_start) db 0
