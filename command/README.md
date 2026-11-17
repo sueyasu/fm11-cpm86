@@ -1,3 +1,25 @@
+## ANSI/VT100 local console diagnostic (ANSITEST)
+
+`ANSITEST.A86` is a non-destructive, interactive CP/M-86 console
+test. Assemble it **inside CP/M-86**, just as with FORMAT:
+
+```text
+A>ASM86 ANSITEST.A86
+A>GENCMD ANSITEST
+A>STAT CON:=CRT:
+A>ANSITEST
+```
+
+Select `CON:=UC1:` instead to verify that the local display receives
+translated ANSI while the serial PTY receives the original sequences.
+The test consists of nine key-stepped screens for positioning,
+CSI K/J/X erasing, SGR colors and rendition, save/restore, VT100
+index/reset and native FM-11 controls. It outputs via BDOS only and
+does not access disk sectors or hardware registers.
+
+The program requires an ANSI-capable local console. `ASM86` and
+`GENCMD` must already be available on the guest disk.
+
 ## Unified FORMAT (floppy 2D/2HD and whole MDC HDD)
 
 `FORMAT.A86` is the sole maintained floppy/HDD formatter source. Both `HDD` and `I:` select the one physical MDC HDD.
