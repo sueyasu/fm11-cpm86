@@ -425,15 +425,28 @@ Both windows are carved from the top of the detected RAM and removed
 from the GETSEGT memory region table (16 KiB total). 128 KiB RAM
 therefore reports an 80 KiB TPA, instead of the old 96 KiB.
 
-**Important:** Writes are not automatically durable just because a
-normal BIOS WRITE returns. A program that bypasses the BIOS disk API,
-such as a direct-FDC format tool, must not be used on a drive with
-unflushed track-cache data. Also avoid removing/replacing a medium
-while dirty data might be cached. There is not yet an explicit cache
-sync/invalidate ABI for direct-controller utilities; until that is
-implemented, reboot normally after finishing file I/O before direct
-formatting or exchanging media. Host emulator `fdatasync` runs on its
-own schedule and does not replace the guest cache's flush.
+**Private cache ABI (compatible with PC-9801 CP/M-86):** Utilities
+can call the fixed 4-byte FAR stubs at `0400:3DD8` (`CACHE_SYNC`)
+and `0400:3DDC` (`CACHE_RESET`) without modifying the standard BIOS
+jump table. Both return CF clear on success and CF set on write-back
+error; the caller's DS and general-purpose registers are preserved.
+`CACHE_SYNC` commits every dirty physical sector but keeps valid
+cached tracks. `CACHE_RESET` first flushes all dirty sectors, then
+invalidates both windows **only if the flush succeeded**.
+
+The `FORMAT` command now calls `CACHE_RESET` after the operator
+confirms the destructive target and **before any direct FDD/HDD I/O**,
+including sourcing an IPL or resident image for `/S`. Failure aborts
+FORMAT without accessing the target. The existing BDOS disk reset
+(function 13) remains after formatting. WBOOT also calls `CACHE_SYNC`
+through the same internal entry.
+
+**Important:** A normal BIOS WRITE returns before the guest cache is
+necessarily durable. Avoid hot-swapping media while dirty data may
+remain. Any other utility that directly accesses FDC/MDC hardware
+must similarly call `CACHE_RESET` before that access. A host
+emulator's periodic `fdatasync` does not replace this guest flush.
+Ctrl-C at CCP is not yet verified to invoke WBOOT on this CP/M-86 core.
 
 Check the fixed resident images and static invariants with `make test`.
 Build a disposable guest self-test resident with
