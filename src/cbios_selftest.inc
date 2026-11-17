@@ -387,9 +387,9 @@ selftest_entry:
 
     ; Commit the modified record. One dirty sector means one WRITE.
     call cache_flush_all
-    jnc .cache_flush_ok
+    jnc .cache_first_flush_ok
     jmp st_restore_failed
-.cache_restore_flush_ok
+.cache_first_flush_ok:
     mov ax,[st_cache_write_before]
     inc ax
     cmp ax,[cache_phys_writes]
@@ -400,9 +400,9 @@ selftest_entry:
     ; Restore must also be committed before claiming the scratch disk
     ; is back to its original contents.
     call cache_flush_all
-    jnc .cache_flush_ok
+    jnc .cache_restore_flush_ok
     jmp st_restore_failed
-.cache_flush_ok
+.cache_restore_flush_ok:
     mov ax,[st_cache_write_before]
     add ax,2
     cmp ax,[cache_phys_writes]
