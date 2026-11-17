@@ -131,7 +131,7 @@ disk layout, and safety restrictions.
 The first commit provides:
 
 - A 0x1900-byte CP/M-86 CBIOS scaffold assembled at offset 2500h.
-- The 21-entry CBIOS jump table and provisional memory region table.
+- The 21-entry CBIOS jump table and dynamically initialized memory region table.
 - Serial console calls via the FM-11 shared 8251 registers at FD06h/FD07h.
 - A standalone 4 KiB **diagnostic** 8088/V20 boot ROM. The reset vector
   transfers to FF00:0000, prints one line to the serial interface and halts.
@@ -364,9 +364,39 @@ FM-11 CP/M-86 BIOS: serial initialized
 The IPL, CBIOS INIT, CCP prompt and empty-directory `DIR` have been
 confirmed in the FM-11 emulator. The new command-populated image still
 requires live verification with `DIR`, `STAT`, `PIP` and executable
-`.CMD` files. `WBOOT`, the provisional memory-region table, and
+`.CMD` files. `WBOOT`, runtime verification of dynamic RAM sizing, and
 more complex file operations also require testing. Avoid using valuable media: this is
 experimental firmware, and the CBIOS supports write operations.
+
+## Installed RAM and dynamic TPA
+
+CBIOS `INIT` detects installed RAM in 128 KiB steps on the current
+FM-11 emulator, and `GETSEGT` returns a dynamically sized MRT.  The
+single TPA region begins at segment `0800h` (physical `08000h`)
+and extends to installed RAM's end, except that the 8088 boot ROM
+at physical `FF000h-FFFFFh` is excluded at 1 MiB.
+
+| Installed RAM | TPA size | MRT length (paragraphs) |
+| --- | --- | --- |
+| 128 KiB | 96 KiB | 1800h |
+| 256 KiB | 224 KiB | 3800h |
+| 384 KiB | 352 KiB | 5800h |
+| 512 KiB | 480 KiB | 7800h |
+| 640 KiB | 608 KiB | 9800h |
+| 768 KiB | 736 KiB | B800h |
+| 896 KiB | 864 KiB | D800h |
+| 1024 KiB | 988 KiB | F700h |
+
+The probe modifies no RAM permanently: both the CBIOS anchor and each
+candidate byte are restored after testing.  It assumes the emulator's
+RAM aliasing model; original hardware memory-decode behavior still
+needs verification.  `make test` checks the complete size/region table
+through a model/static regression; **guest runtime testing remains
+necessary**.  The optional CBIOS self-test also prints the computed
+MRT length as `MRT TPA paragraphs=5800` (example for 384 KiB).
+
+See [docs/architecture.md](docs/architecture.md) for the probe
+algorithm and hardware compatibility notes.
 
 ## Next milestones
 
