@@ -168,6 +168,7 @@ test: check diag cbios-diag $(BUILD)/iplrom.bin $(BUILD)/test_2hd.d88 $(BUILD)/t
 		$(BUILD)/test_2hd.raw $(BUILD)/test_2hd.d88
 	$(PYTHON) tests/check_fdformat_inc.py $(BUILD)/ipl_2d.bin $(BUILD)/ipl_2hd.bin command/FDIPL2D.INC command/FDIPL2HD.INC
 	$(PYTHON) tests/check_boot_hdd.py $(BUILD)/hdd_bootrom.bin $(BUILD)/ipl_hdd.bin $(BUILD)/cbios_hdd.bin $(BUILD)/test_hdd.img m2230b
+	$(PYTHON) tests/test_boot_hdd_directory.py
 	$(PYTHON) tests/check_fdformat_source.py
 	$(PYTHON) tests/check_format_source.py
 	$(PYTHON) tests/check_fdformat_boot_patch.py $(BUILD)/cbios.bin $(BUILD)/cbios_2hd.bin
