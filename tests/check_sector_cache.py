@@ -20,8 +20,8 @@ assert "cache_valid db 0" in cache
 
 # Two 128-byte logical records must resolve to one 256-byte physical
 # record; the cache key includes every physical identity dimension.
-for source in (bios, cache):
-    assert "shr bx,1" in source
+assert "shr bx,1" in cache
+assert "and bx,1" in bios and "shl bx,1" in bios
 for item in ("[cache_drive]", "[cache_track]", "[cache_sector]",
              "[cur_disk]", "[cur_track]", "[cur_sector]"):
     assert item in cache, item
