@@ -388,10 +388,12 @@ at physical `FF000h-FFFFFh` is excluded at 1 MiB.
 | 896 KiB | 864 KiB | D800h |
 | 1024 KiB | 988 KiB | F700h |
 
-The probe modifies no RAM permanently: both the CBIOS anchor and each
-candidate byte are restored after testing.  It assumes the emulator's
-RAM aliasing model; original hardware memory-decode behavior still
-needs verification.  `make test` checks the complete size/region table
+The probe writes and reads back both 55h and AAh, and also checks
+whether either write changes a separate anchor byte. This detects both
+RAM mirroring and absent RAM that ignores writes (returning fixed
+zero or FFh). Neither the candidate byte nor the anchor is left
+modified. Unusual open-bus decoders on original hardware still require
+verification.  `make test` checks the complete size/region table
 at all 113 capacities in 8 KiB increments through a model/static
 regression; **guest runtime testing remains
 necessary**.  The optional CBIOS self-test also prints the computed
