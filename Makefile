@@ -8,7 +8,7 @@ CPM86_CORE ?= external/system/cpm86_core.bin
 # both image builders before a disk image is written.
 EXTERNAL_FILES := $(filter-out external/commands/README.md,$(sort $(wildcard external/commands/*)))
 
-.PHONY: all check-tools check-core bios rom diag cbios-diag boot boot-d88 boot-2hd boot-hdd fdformat-inc hddipl-inc format-inc selftest check test clean
+.PHONY: all check-tools check-core bios rom diag cbios-diag boot boot-d88 boot-2hd boot-hdd hddipl-inc format-inc selftest check test clean
 all: bios rom check
 
 check-tools:
@@ -47,7 +47,7 @@ $(BUILD)/ipl_2hd.bin: src/ipl_2hd.asm | $(BUILD)
 	$(NASM) -f bin $< -o $@
 
 # CP/M-86 ASM86 includes: generated from the exact disk IPL binaries.
-# These files are consumed by command/FDFORMAT.A86 under CP/M-86.
+# These files are consumed by command/FORMAT.A86 under CP/M-86.
 command/FDIPL2D.INC: $(BUILD)/ipl_2d.bin command/bin2a86.py
 	$(PYTHON) command/bin2a86.py $< $@ --label fdipl2d_template --expect-size 512
 
@@ -58,8 +58,6 @@ command/HDIPL.INC: $(BUILD)/ipl_hdd.bin command/bin2a86.py
 	$(PYTHON) command/bin2a86.py $< $@ --label hdipl_template --expect-size 512
 
 hddipl-inc: command/HDIPL.INC
-
-fdformat-inc: command/FDIPL2D.INC command/FDIPL2HD.INC
 
 # ASM86 FORMAT.A86 requires all three disk IPL include files.
 format-inc: command/FDIPL2D.INC command/FDIPL2HD.INC command/HDIPL.INC
@@ -172,7 +170,6 @@ test: check diag cbios-diag $(BUILD)/iplrom.bin $(BUILD)/test_2hd.d88 $(BUILD)/t
 	$(PYTHON) tests/check_fdformat_inc.py $(BUILD)/ipl_2d.bin $(BUILD)/ipl_2hd.bin command/FDIPL2D.INC command/FDIPL2HD.INC
 	$(PYTHON) tests/check_boot_hdd.py $(BUILD)/hdd_bootrom.bin $(BUILD)/ipl_hdd.bin $(BUILD)/cbios_hdd.bin $(BUILD)/test_hdd.img m2230b
 	$(PYTHON) tests/test_boot_hdd_directory.py
-	$(PYTHON) tests/check_fdformat_source.py
 	$(PYTHON) tests/check_format_source.py
 	$(PYTHON) tests/check_fdformat_boot_patch.py $(BUILD)/cbios.bin $(BUILD)/cbios_2hd.bin $(BUILD)/cbios_hdd.bin
 	$(PYTHON) tests/check_image_files.py
