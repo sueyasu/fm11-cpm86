@@ -89,7 +89,7 @@ INIT:
     mov [dma_seg],cs
     ; Console field of the CP/M-86 IOBYTE (bits 1:0):
     ; 00 TTY (USART0), 01 CRT (local), 10 BAT (TTY fallback),
-    ; 11 UC1 (local input, mirrored CRT+TTY output).
+    ; 11 UC1 (local+serial input, mirrored CRT+TTY output).
 %if CONSOLE_LOCAL
     mov byte [iobyte],1
 %else
@@ -144,8 +144,9 @@ CONST:
     and al,3
     cmp al,1                 ; CRT
     je .local
-    cmp al,3                 ; UC1: local keyboard
-    je .local
+    cmp al,3                 ; UC1: either input makes console ready
+    je .shared
+.serial:
     push dx
     mov dx,SER_STATUS
     in al,dx
@@ -158,13 +159,20 @@ CONST:
     jmp short .done
 .local:
     call local_const
+    jmp short .done
+.shared:
+    ; local_const only caches a local key; it never consumes serial data.
+    call local_const
+    or al,al
+    jnz .done
+    jmp short .serial
 .done:
     mov ah,bh
     pop bx
     ret
 
 CONIN:
-    ; TTY/BAT read USART0; CRT/UC1 read the local keyboard.
+    ; TTY/BAT read USART0, CRT reads local; UC1 polls both inputs.
     push bx
     mov bh,ah
     mov al,[iobyte]
@@ -172,7 +180,7 @@ CONIN:
     cmp al,1
     je .local
     cmp al,3
-    je .local
+    je .shared
 .serial_wait:
     push dx
     mov dx,SER_STATUS
@@ -180,13 +188,41 @@ CONIN:
     test al,SER_RX_READY
     pop dx
     jz .serial_wait
+    jmp short .serial_read
+.local:
+    call local_conin
+    jmp short .done
+.shared:
+    ; Do not call blocking local_conin until a local key is buffered.
+    ; Alternate preference only when both sources are ready.
+.shared_wait:
+    call local_const
+    mov bl,al               ; FFh if a local byte is buffered
+    push dx
+    mov dx,SER_STATUS
+    in al,dx
+    test al,SER_RX_READY
+    pop dx
+    jz .no_serial
+    test bl,bl
+    jz .shared_serial
+    cmp byte [uc1_next],0
+    jne .shared_serial
+.shared_local:
+    mov byte [uc1_next],1   ; prefer serial next time
+    call local_conin
+    jmp short .done
+.no_serial:
+    test bl,bl
+    jz .shared_wait
+    jmp short .shared_local
+.shared_serial:
+    mov byte [uc1_next],0   ; prefer local next time
+.serial_read:
     push dx
     mov dx,SER_DATA
     in al,dx
     pop dx
-    jmp short .done
-.local:
-    call local_conin
 .done:
     mov ah,bh
     pop bx
@@ -590,6 +626,7 @@ SETIOBF:
 hello db 'FM-11 CP/M-86 BIOS: serial initialized',13,10,0
 cur_disk db 0
 iobyte db 0                ; initialized in INIT; full byte kept for STAT
+uc1_next db 0              ; 0=local, 1=serial; tie-break preference
 cur_track dw 0
 cur_sector dw 0
 dma_off dw 0x80
