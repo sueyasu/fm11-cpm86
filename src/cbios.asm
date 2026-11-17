@@ -129,8 +129,12 @@ WBOOT:
 
 CONST:
 %if CONSOLE_LOCAL
-    ; CONST polls once and caches an available character; 00h/FFh in AL.
+    ; CONST returns status only in AL, preserving the caller's AH.
+    push bx
+    mov bh,ah
     call local_const
+    mov ah,bh
+    pop bx
     ret
 %else
     ; Preserve DX: FM-11 I/O requires the DX-form IN instruction.
@@ -148,7 +152,12 @@ CONST:
 
 CONIN:
 %if CONSOLE_LOCAL
+    ; CONIN also preserves AH and all registers other than return AL.
+    push bx
+    mov bh,ah
     call local_conin
+    mov ah,bh
+    pop bx
     ret
 %else
     call CONST
