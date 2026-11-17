@@ -17,6 +17,16 @@ BIOS_SIZE    equ 0x1900
 %ifndef BOOT_DRIVE
 %define BOOT_DRIVE 0             ; 2D=A:, 2HD=E:, HDD=I: (8)
 %endif
+; Native screen/keyboard console is the normal FM-11 configuration.
+; CBIOS_SELFTEST remains serial to preserve existing diagnostic behavior.
+; Build with -DCONSOLE_LOCAL=0 to retain the original serial console.
+%ifndef CONSOLE_LOCAL
+%ifdef CBIOS_SELFTEST
+%define CONSOLE_LOCAL 0
+%else
+%define CONSOLE_LOCAL 1
+%endif
+%endif
 BIOS_WORK    equ 0x3E00
 BIOS_STACK   equ BIOS_WORK+0x0200 ; 0400h:4000h ends below TPA 0800h
 BDOS_INT     equ 0x00E0
@@ -90,6 +100,17 @@ INIT:
     mov cx,BOOT_DRIVE
     mov byte [cur_disk],cl
     mov byte [0x24b7],cl
+%if CONSOLE_LOCAL
+    ; Initialize the native local 80x25 screen for the cold CCP prompt.
+    mov byte [local_key_valid],0
+    mov byte [local_seq_count],0
+    mov al,0x16            ; native clear all
+    call local_putc
+    mov al,0x0b            ; native home
+    call local_putc
+    mov si,local_hello
+    call local_puts
+%endif
     sti
 %ifdef CBIOS_SELFTEST
     jmp selftest_entry   ; diagnostic build: never enter CCP/BDOS
@@ -101,20 +122,29 @@ WBOOT:
     jmp 0x0006           ; provisional: disk reload not implemented
 
 CONST:
-    ; Preserve DX: unlike the PC-98 immediate-port IN, FM-11 I/O
-    ; addresses require the DX form.  BDOS/CCP may hold live data in DX.
+%if CONSOLE_LOCAL
+    ; CONST polls once and caches an available character; 00h/FFh in AL.
+    call local_const
+    ret
+%else
+    ; Preserve DX: FM-11 I/O requires the DX-form IN instruction.
     push dx
     mov dx,SER_STATUS
     in al,dx
     test al,SER_RX_READY
     mov al,0
     jz .done
-    dec al               ; 0xFF means input available
+    dec al
 .done:
     pop dx
     ret
+%endif
 
 CONIN:
+%if CONSOLE_LOCAL
+    call local_conin
+    ret
+%else
     call CONST
     or al,al
     jz CONIN
@@ -123,12 +153,21 @@ CONIN:
     in al,dx
     pop dx
     ret
+%endif
 
 CONOUT:
+    mov al,cl
+%if CONSOLE_LOCAL
+    call local_putc
+%else
+    call serial_putc
+%endif
+    ret
+
 LISTOUT:
 PUNCH:
     mov al,cl
-    call serial_putc
+    call serial_putc        ; printer/auxiliary channel remains USART0
     ret
 
 READER:
@@ -779,6 +818,11 @@ mrt:
     dw 0x0800
 mrt_tpa_len:
     dw 0x7800
+
+%if CONSOLE_LOCAL
+local_hello db 'FM-11 CP/M-86 local console',13,10,0
+%include "src/cbios_local_console.inc"
+%endif
 
 ; Pad the CBIOS itself (not the optional 0x2500-byte preceding core).
 times BIOS_SIZE - ($ - bios_start) db 0
