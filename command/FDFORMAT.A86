@@ -1,12 +1,12 @@
 ; FDFORMAT.A86 -- FM-11 CP/M-86 floppy initializer.
 ; Ported in design from pc98_cpm86/command/FDFORMAT.A86.
-; IMPORTANT: FM-11 emulator currently does NOT implement WRITE TRACK.
-; This command reinitializes media with existing valid physical sectors;
-; it cannot construct sectors on a truly unformatted disk.
+; Uses FM-11 WD179x WRITE TRACK command F0h with a complete
+; FE/CHRN/F7 and FB/data/F7 stream built in a DMA-safe buffer.
+; The emulator must have a mounted image with a supported geometry.
 ;
-; Usage: FDFORMAT A: ... H:       initialize an existing 2D/2HD disk
-;        FDFORMAT /S A: ... H:    install the matching 2D/2HD system IPL
-;        /L is refused: physical formatting is not yet supported.
+; Usage: FDFORMAT A: ... H:       physically format + initialize directory
+;        FDFORMAT /S A: ... H:    physically format + bootable system
+;        FDFORMAT /L A: ... H:    physical low-level format only.
 ;
 ; A..D = 2D unit 0..3 (FD18h, 8237 CH0, 40x2x16x256)
 ; E..H = 2HD unit 0..3 (FD30h, 8237 CH1, 77x2x26x256,
@@ -26,6 +26,11 @@ MODE_SYSTEM    equ     1
 MODE_LOW       equ     2
 RES_SECTORS    equ     62
 FMT_FILL       equ     0e5h
+FMT_TRACK2D    equ     6400
+FMT_TRACK2HD   equ     10900
+FMT_MAX        equ     FMT_TRACK2HD
+FMT_ALT        equ     FMT_TRACK2HD
+FMT_64K_LIMIT  equ     65536-FMT_MAX
 
 cseg
 start:
@@ -54,13 +59,6 @@ parsed:
         mov     al,':'
         call    putc
         call    crlf
-        cmp     Byte Ptr mode,MODE_LOW
-        je     FDF_SKIP_002
-        jmp     mode_supported
-FDF_SKIP_002:
-        mov     dx,offset msg_low_unsupported
-        call    puts
-        jmp     exit_program
 mode_supported:
         mov     dx,offset msg_warning
         call    puts
@@ -107,6 +105,12 @@ target_ready:
         jnc     FDF_SKIP_007
         jmp     io_failed
 FDF_SKIP_007:
+        cmp     Byte Ptr mode,MODE_LOW
+        jne    fdf_not_low
+        mov     dx,offset msg_done_low
+        call    puts
+        jmp     reset_exit
+fdf_not_low:
         cmp     Byte Ptr mode,MODE_SYSTEM
         je     FDF_SKIP_008
         jmp     done_data
@@ -404,53 +408,135 @@ FDF_SKIP_039:
 adv_done:
         ret
 
-; Erase all *existing* physical sectors with E5h. The FDC does not
-; implement WRITE TRACK; this routine never claims to create sectors.
+; Generate and write every physical side-track with WD17xx F0h.
+; 2D: 40 cylinders, 2 sides, 16 IDs, 256 byte data, 6400 DMA bytes.
+; 2HD: 77 cylinders, 2 sides, 26 IDs, 256 byte data, 10900 DMA bytes.
+; C0/H0 on 2HD is FM with 128 byte records and N=0.
 initialize_media:
-        push    es
-        push    ds
-        pop     es
-        mov     di,offset sectorbuf
-        mov     cx,128
-        mov     ax,0e5e5h
-        cld
-        rep     stosw
-        pop     es
-
         mov     Byte Ptr io_cyl,0
+fmt_cyl_loop:
         mov     Byte Ptr io_head,0
-        mov     Byte Ptr io_sector,1
-im_loop:
-        mov     Word Ptr io_size,256
-        cmp     Byte Ptr io_channel,0
-        jne     FDF_SKIP_040
-        jmp     im_regular
-FDF_SKIP_040:
-        cmp     Byte Ptr io_cyl,0
-        je     FDF_SKIP_041
-        jmp     im_regular
-FDF_SKIP_041:
-        cmp     Byte Ptr io_head,0
-        je     FDF_SKIP_042
-        jmp     im_regular
-FDF_SKIP_042:
-        mov     Word Ptr io_size,128
-im_regular:
-        mov     Byte Ptr io_write,1
-        call    disk_transfer
-        jnc     FDF_SKIP_043
-        jmp     im_fail
-FDF_SKIP_043:
-        call    advance_sector
+fmt_head_loop:
+        call    build_format_track
+        jc      fmt_fail
+        call    format_transfer
+        jc      fmt_fail
+        inc     Byte Ptr io_head
+        cmp     Byte Ptr io_head,2
+        jb      fmt_head_loop
+        inc     Byte Ptr io_cyl
         mov     al,Byte Ptr io_cyl
         cmp     al,Byte Ptr cylinders
-        jae     FDF_SKIP_044
-        jmp     im_loop
-FDF_SKIP_044:
+        jb      fmt_cyl_loop
         clc
         ret
-im_fail:
+fmt_fail:
         stc
+        ret
+
+; Choose a DMA-safe location for up to 10,900 consecutive bytes.
+; Two buffers separated by FMT_ALT guarantee one does not cross
+; the physical 64-KiB page boundary, regardless of transient DS.
+; Both candidates fit wholly within the transient DSEG.
+choose_track_buffer:
+        mov     Word Ptr track_ptr,offset track_area
+        mov     ax,ds
+        mov     bx,16
+        mul     bx
+        add     ax,offset track_area
+        cmp     ax,FMT_64K_LIMIT
+        jbe     ctb_good
+        add     Word Ptr track_ptr,FMT_ALT
+ctb_good:
+        ret
+
+; Fill the whole DMA stream with 4Eh gap bytes, then place
+; address marks and CRC-generation tokens like NitrOS-9 format.
+; Format pattern:
+;   00*5 FE C H R N F7 00*5 FB E5*sector_size F7
+; Validated by FloppyDevice::formatTrack on the emulator.
+build_format_track:
+        call    choose_track_buffer
+        mov     Word Ptr track_length,FMT_TRACK2D
+        mov     Word Ptr fmt_secbytes,256
+        mov     Byte Ptr fmt_n,1
+        cmp     Byte Ptr io_channel,0
+        je      bft_geometry_done
+        mov     Word Ptr track_length,FMT_TRACK2HD
+        cmp     Byte Ptr io_cyl,0
+        jne     bft_geometry_done
+        cmp     Byte Ptr io_head,0
+        jne     bft_geometry_done
+        mov     Word Ptr fmt_secbytes,128
+        mov     Byte Ptr fmt_n,0
+bft_geometry_done:
+        push    es
+        push    di
+        push    cx
+        push    bx
+        push    ax
+        push    ds
+        pop     es
+        mov     di,Word Ptr track_ptr
+        mov     cx,Word Ptr track_length
+        shr     cx,1
+        mov     ax,04e4eh
+        cld
+        rep     stosw
+
+        mov     di,Word Ptr track_ptr
+        mov     bl,1
+bft_sector_loop:
+        ; 5 ID sync zeros
+        mov     cx,5
+        xor     ax,ax
+        rep     stosb
+        mov     al,0feh
+        stosb
+        mov     al,Byte Ptr io_cyl
+        stosb
+        mov     al,Byte Ptr io_head
+        stosb
+        mov     al,bl
+        stosb
+        mov     al,Byte Ptr fmt_n
+        stosb
+        mov     al,0f7h
+        stosb
+        ; 5 data sync zeros and 256/128 data bytes
+        mov     cx,5
+        xor     ax,ax
+        rep     stosb
+        mov     al,0fbh
+        stosb
+        mov     cx,Word Ptr fmt_secbytes
+        mov     al,FMT_FILL
+        rep     stosb
+        mov     al,0f7h
+        stosb
+        inc     bl
+        mov     al,Byte Ptr sectors_per_side
+        cmp     bl,al
+        jbe     bft_sector_loop
+
+        pop     ax
+        pop     bx
+        pop     cx
+        pop     di
+        pop     es
+        clc
+        ret
+
+format_transfer:
+        ; Use the same FDC and DMA ports as ordinary sector transfers,
+        ; but WRITE TRACK always transfers memory to controller.
+        mov     ax,Word Ptr track_ptr
+        mov     Word Ptr dma_ptr,ax
+        mov     ax,Word Ptr track_length
+        mov     Word Ptr dma_length,ax
+        mov     Byte Ptr dma_command,0f0h
+        mov     Byte Ptr dma_write,1
+        call    physical_dma_transfer
         ret
 
 ; Write the appropriate 512-byte first stage and 62 resident sectors.
@@ -606,6 +692,20 @@ vs_fail:
 ; io_write = 0 read, 1 write; io_size = 128 or 256
 ; Result CF clear only on FDC status 0 AND terminal count.
 disk_transfer:
+        mov     Word Ptr dma_ptr,offset sectorbuf
+        mov     ax,Word Ptr io_size
+        mov     Word Ptr dma_length,ax
+        mov     Byte Ptr dma_command,080h
+        cmp     Byte Ptr io_write,0
+        je      dt_read_cmd
+        mov     Byte Ptr dma_command,0a0h
+dt_read_cmd:
+        mov     al,Byte Ptr io_write
+        mov     Byte Ptr dma_write,al
+        call    physical_dma_transfer
+        ret
+
+physical_dma_transfer:
         push    ax
         push    bx
         push    cx
@@ -616,9 +716,12 @@ disk_transfer:
         mov     ax,ds
         mov     si,16
         mul     si
-        add     ax,offset sectorbuf
+        add     ax,Word Ptr dma_ptr
         adc     dx,0
-        cmp     ax,0ff00h
+        mov     bx,ax
+        add     bx,Word Ptr dma_length
+        jc      dt_bad
+        cmp     dx,15
         jbe     FDF_SKIP_055
         jmp     dt_bad
 FDF_SKIP_055:
@@ -656,7 +759,7 @@ dt_addr:
 FDF_SKIP_058:
         mov     dl,013h
 dt_count:
-        mov     ax,Word Ptr io_size
+        mov     ax,Word Ptr dma_length
         dec     ax
         out     dx,al
         mov     al,ah
@@ -722,12 +825,7 @@ dt_side:
 FDF_SKIP_063:
         mov     dl,030h
 dt_command:
-        mov     al,080h
-        cmp     Byte Ptr io_write,0
-        jne     FDF_SKIP_064
-        jmp     dt_start
-FDF_SKIP_064:
-        mov     al,0a0h
+        mov     al,Byte Ptr dma_command
 dt_start:
         out     dx,al
         mov     cx,0ffffh
@@ -848,46 +946,38 @@ io_write        db      0
 io_size         dw      256
 image_offset    dw      0
 remaining       dw      0
+dma_ptr         dw      0
+dma_length      dw      0
+dma_command     db      0
+dma_write       db      0
+track_ptr       dw      0
+track_length    dw      0
+fmt_secbytes    dw      256
+fmt_n           db      1
 
 msg_title       db      0dh,0ah,'FM-11 CP/M-86 FDFORMAT',0dh,0ah,'$'
 msg_usage       db      'Usage: FDFORMAT A:..H: [/S|/L]',0dh,0ah
-                db      '/S=install boot system; /L not supported yet',0dh,0ah,'$'
-msg_target      db      'Target drive: 
+                db      '/S=bootable system, /L=physical format only',0dh,0ah,'$'
+msg_target      db      'Target drive: $'
+msg_warning     db      'WARNING: all target data will be destroyed!',0dh,0ah
                 db      'Continue (Y/N)? $'
-msg_low_unsupported db  'Physical WRITE TRACK formatting is not implemented.',0dh,0ah,'$'
 msg_abort       db      0dh,0ah,'Aborted.',0dh,0ah,'$'
 msg_source_error db     'Cannot read matching A:/E: system resident; disk unchanged.',0dh,0ah,'$'
-msg_format      db      'Initializing existing physical sectors...',0dh,0ah,'$'
+msg_format      db      'Physical WRITE TRACK formatting...',0dh,0ah,'$'
 msg_install     db      'Installing IPL and clean resident image...',0dh,0ah,'$'
-msg_io_error    db      'Disk I/O or verify failed at C/H/S=', '$'
-msg_done_data   db      'Data disk initialization complete.',0dh,0ah,'$'
-msg_done_system db      'Bootable system disk initialization complete.',0dh,0ah,'$'
+msg_io_error    db      'Disk I/O or format failed at C/H/S= $'
+msg_done_data   db      'Data disk physical format complete.',0dh,0ah,'$'
+msg_done_system db      'Bootable system disk physical format complete.',0dh,0ah,'$'
+msg_done_low    db      'Physical format complete (/L).',0dh,0ah,'$'
 
 INCLUDE FDIPL2D.INC
 INCLUDE FDIPL2HD.INC
 
 sectorbuf       rs      256
 system_image    rs      03e00h
-local_stack     rs      1024
-local_stack_top db      0
-end
-
-msg_warning     db      'WARNING: erases target disk (existing sector layout only).',0dh,0ah
-                db      'Continue (Y/N)? $'
-msg_low_unsupported db  'Physical WRITE TRACK formatting is not implemented.',0dh,0ah,'$'
-msg_abort       db      0dh,0ah,'Aborted.',0dh,0ah,'$'
-msg_source_error db     'Cannot read matching A:/E: system resident; disk unchanged.',0dh,0ah,'$'
-msg_format      db      'Initializing existing physical sectors...',0dh,0ah,'$'
-msg_install     db      'Installing IPL and clean resident image...',0dh,0ah,'$'
-msg_io_error    db      'Disk I/O or verify failed at C/H/S=', '$'
-msg_done_data   db      'Data disk initialization complete.',0dh,0ah,'$'
-msg_done_system db      'Bootable system disk initialization complete.',0dh,0ah,'$'
-
-INCLUDE FDIPL2D.INC
-INCLUDE FDIPL2HD.INC
-
-sectorbuf       rs      256
-system_image    rs      03e00h
+; Two alternative 10,900-byte DMA regions; select one that stays
+; within a physical 64-KiB DMA page.
+track_area      rs      FMT_MAX+FMT_ALT
 local_stack     rs      1024
 local_stack_top db      0
 end
