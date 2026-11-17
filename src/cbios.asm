@@ -90,8 +90,14 @@ INIT:
     ; Before giving BDOS the memory region table, detect installed RAM.
     ; Keep 0400h:0000h-3FFFh resident and all probing side-effect-free.
     call init_mrt
+%if CONSOLE_LOCAL
+    ; Keep the BOOT_DRIVE immediate at its on-disk patchable BIOS offset
+    ; without requiring USART0 to be ready for a local-screen cold boot.
+    times 6 nop
+%else
     mov si,hello
     call serial_puts
+%endif
 
     ; Match the CP/M-86 v1.1 cold-start ABI from pc98_cpm86:
     ; BDOS CURDRV resides at offset 24B7h in the common system segment.
