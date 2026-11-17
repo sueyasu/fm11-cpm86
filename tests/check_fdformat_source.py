@@ -20,11 +20,19 @@ required = (
     "io_channel,1",
     "io_size,128",
     "io_size,256",
-    "write track",     # This is currently explicitly unsupported.
+    "format_transfer",
+    "build_format_track",
+    "physical_dma_transfer",
+    "FMT_TRACK2D",
+    "FMT_TRACK2HD",
+    "track_area",
 )
 for token in required:
     assert token.lower() in source.lower(), f"FDFORMAT.A86 missing {token}"
 assert "int     01bh" not in source.lower(), "PC-98 ROM BIOS call leaked into FM-11"
+assert "mov     Byte Ptr dma_command,0f0h" in source
+assert "msg_low_unsupported" not in source
+assert source.rstrip().endswith("end\n\x1a".rstrip()), "ASM86 source must have END and Ctrl-Z"
 definitions = set(re.findall(r"^([A-Za-z_][\w]*):", source, re.M | re.I))
 references = re.findall(
     r"^\s*(?:CALL|JMP|JE|JNE|JZ|JNZ|JC|JNC|JA|JAE|JB|JBE|LOOP)\s+"
