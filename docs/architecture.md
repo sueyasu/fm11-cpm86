@@ -23,6 +23,49 @@ The experimental 2D IPL ROM now loads this resident image at segment
 out at 0400:4000 (physical 08000h), below the TPA base at segment 0800h. A usable CCP/BDOS boot is
 not yet verified.
 
+## Cold-boot RAM detection and CP/M-86 Memory Region Table
+
+CBIOS `INIT` calls `init_mrt` before entering CCP.  With the FM-11
+emulator's configurable RAM address decoder, memory not populated above
+the installed capacity aliases RAM at the beginning of the address
+space.  The routine tests physical 128 KiB boundaries (128 through
+896 KiB) by writing a marker at the *same offset* as a private CBIOS
+anchor.  It saves and restores **both** the candidate byte and anchor,
+avoiding permanent modifications to any populated RAM.  The CBIOS
+uses segment 0400h, so the anchor and every candidate remain within
+20-bit physical RAM, outside the 8088 boot ROM window.
+
+`GETSEGT` still returns a pointer in BX to the existing one-entry
+Memory Region Table (MRT).  `INIT` updates only its length; the region
+always begins at segment 0800h (physical 08000h).  The resident
+CCP/BDOS/CBIOS and stack are below this boundary.
+
+| Installed RAM | TPA region segment | Length (paragraphs) | TPA size |
+| --- | --- | --- | --- |
+| 128 KiB | 0800h | 1800h | 96 KiB |
+| 256 KiB | 0800h | 3800h | 224 KiB |
+| 384 KiB | 0800h | 5800h | 352 KiB |
+| 512 KiB | 0800h | 7800h | 480 KiB |
+| 640 KiB | 0800h | 9800h | 608 KiB |
+| 768 KiB | 0800h | B800h | 736 KiB |
+| 896 KiB | 0800h | D800h | 864 KiB |
+| 1024 KiB | 0800h | F700h | 988 KiB |
+
+At 1024 KiB, the upper physical FF000h-FFFFFh is overlaid by the
+8088 reset ROM.  Thus the MRT stops at segment FF00h instead of
+extending to the 1 MiB address-space boundary.  The all-size check is
+`python3 tests/check_ram_mrt.py build/cbios.bin` (also run by
+`make test`).
+
+**Hardware validation:** These probes rely on RAM mirroring, which
+is implemented by the current FM-11 emulator.  Memory decode behavior
+of every original FM-11 RAM expansion configuration has not yet been
+verified on real hardware.  The source-level test models the emulator
+decoder, not a live CPU or a booted CP/M-86 system.  Validate the
+MRT via a guest command that calls `GETSEGT` (and by executing
+programs above 512 KiB) before relying on the larger configurations
+on a real FM-11.
+
 ## FM-11 devices
 
 - Serial data/status: I/O ports FD06h and FD07h. The current emulator's
