@@ -37,6 +37,32 @@ assert "mov     ax,0e5e5h" in source
 assert "msg_hdd_options" in source
 assert "INCLUDE FDIPL2D.INC" in source
 assert "INCLUDE FDIPL2HD.INC" in source
+assert "INCLUDE HDIPL.INC" in source
+assert "hdd_install_system:" in source
+assert "hdd_verify_system:" in source
+assert "hdd_copy_to_sectorbuf:" in source
+assert "hdd_compare_sector:" in source
+assert "hdd_read_sector:" in source
+assert "call    hdd_install_system" in source
+assert "call    hdd_verify_system" in source
+assert "call    hdd_sense" in source
+assert "cmp     al,HDD_DRIVE" in source
+assert "cmp     Byte Ptr mode,MODE_LOW" in source
+assert "msg_hdd_system_done" in source
+assert "mov     al,070h" in source  # binary LBA mode, same as CBIOS
+assert "hdd_lba_shift:" in source
+assert "rcl     dx,1" in source
+assert "mov     Word Ptr hdd_remaining,64" in source
+assert "mov     Word Ptr remaining,RES_SECTORS" in source
+assert "mov     Word Ptr remaining,2" in source
+assert source.count("call    hdd_write_sector") >= 3
+assert source.count("call    hdd_read_sector") >= 3
+for name in ("msg_title","msg_usage","msg_hdd_name","msg_hdd_options",
+             "msg_hdd_install","msg_hdd_format","msg_hdd_error",
+             "msg_hdd_system_done"):
+    matches = re.findall(r"^" + name + r"\s+db\b", source, re.M | re.I)
+    assert len(matches) == 1, f"missing or duplicated {name}"
+
 
 # Check all nine known MDC geometries against original emulator constants.
 geometries = (
