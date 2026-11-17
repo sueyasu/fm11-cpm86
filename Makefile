@@ -3,7 +3,10 @@ NASM ?= nasm
 PYTHON ?= python3
 BUILD := build
 CPM86_CORE ?= external/system/cpm86_core.bin
-EXTERNAL_COMMANDS := $(sort $(wildcard external/commands/*.CMD external/commands/*.cmd))
+# Import all CP/M-compatible 8.3 files (CMD/A86/INC/TXT/etc.).
+# README.md is host-only documentation; CP/M 8.3 names are validated by
+# both image builders before a disk image is written.
+EXTERNAL_FILES := $(filter-out external/commands/README.md,$(sort $(wildcard external/commands/*)))
 
 .PHONY: all check-tools check-core bios rom diag cbios-diag boot boot-d88 boot-2hd fdformat-inc selftest check test clean
 all: bios rom check
@@ -53,9 +56,9 @@ command/FDIPL2HD.INC: $(BUILD)/ipl_2hd.bin command/bin2a86.py
 
 fdformat-inc: command/FDIPL2D.INC command/FDIPL2HD.INC
 
-$(BUILD)/fm11_cpm86_2d.img: $(BUILD)/cbios.bin tests/build_boot_2d.py $(CPM86_CORE) $(EXTERNAL_COMMANDS) | $(BUILD)
+$(BUILD)/fm11_cpm86_2d.img: $(BUILD)/cbios.bin tests/build_boot_2d.py $(CPM86_CORE) $(EXTERNAL_FILES) | $(BUILD)
 	$(PYTHON) tests/build_boot_2d.py --core $(CPM86_CORE) --cbios $(BUILD)/cbios.bin \
-		$(foreach f,$(EXTERNAL_COMMANDS),--file $(f)) $@
+		$(foreach f,$(EXTERNAL_FILES),--file $(f)) $@
 
 boot: check-core $(BUILD)/iplrom.bin $(BUILD)/fm11_cpm86_2d.img
 
@@ -72,9 +75,9 @@ boot-d88: check-core $(BUILD)/fm11_cpm86_boot_2d.d88
 
 # Native FM-11 2HD: mixed 128-byte FM boot track / 256-byte MFM tracks.
 # The 2HD resident is built separately with cold-start drive E:.
-$(BUILD)/fm11_cpm86_boot_2hd.d88: $(BUILD)/cbios_2hd.bin $(BUILD)/ipl_2hd.bin tests/build_boot_2hd.py tests/build_boot_2d.py $(CPM86_CORE) $(EXTERNAL_COMMANDS) | $(BUILD)
+$(BUILD)/fm11_cpm86_boot_2hd.d88: $(BUILD)/cbios_2hd.bin $(BUILD)/ipl_2hd.bin tests/build_boot_2hd.py tests/build_boot_2d.py $(CPM86_CORE) $(EXTERNAL_FILES) | $(BUILD)
 	$(PYTHON) tests/build_boot_2hd.py --core $(CPM86_CORE) --cbios $(BUILD)/cbios_2hd.bin \
-		--ipl $(BUILD)/ipl_2hd.bin $(foreach f,$(EXTERNAL_COMMANDS),--file $(f)) \
+		--ipl $(BUILD)/ipl_2hd.bin $(foreach f,$(EXTERNAL_FILES),--file $(f)) \
 		--raw-output $(BUILD)/fm11_cpm86_boot_2hd.raw --output $@
 
 boot-2hd: check-core $(BUILD)/fm11_cpm86_boot_2hd.d88
@@ -129,6 +132,7 @@ test: check diag cbios-diag $(BUILD)/iplrom.bin $(BUILD)/test_2hd.d88 fdformat-i
 		$(BUILD)/test_2hd.raw $(BUILD)/test_2hd.d88
 	$(PYTHON) tests/check_fdformat_inc.py $(BUILD)/ipl_2d.bin $(BUILD)/ipl_2hd.bin command/FDIPL2D.INC command/FDIPL2HD.INC
 	$(PYTHON) tests/check_fdformat_source.py
+	$(PYTHON) tests/check_image_files.py
 	$(PYTHON) tests/check_cbios_segments.py
 	$(PYTHON) tests/check_diag.py $(BUILD)/fdc2d_diag.bin
 	$(PYTHON) tests/check_cbios_diag.py $(BUILD)/cbios_diag.bin $(BUILD)/cbios_diag_2d.img $(BUILD)/cbios.bin
