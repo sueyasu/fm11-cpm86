@@ -394,6 +394,36 @@ selftest_entry:
     mov si,st_write_ok
     call serial_puts
 
+    ; First-login SELDSK must discard the clean sector cache. A READ of
+    ; exactly the same record must now reach the physical disk once.
+    mov ax,[cache_phys_reads]
+    mov [st_cache_read_before],ax
+    mov cl,0
+    xor dl,dl
+    call SELDSK
+    mov cx,ST_CHECK
+    call SETDMA
+    call READ
+    or ax,ax
+    ST_CHECK_Z
+    mov ax,[st_cache_read_before]
+    inc ax
+    cmp ax,[cache_phys_reads]
+    ST_CHECK_EQ
+    ; Data on the medium must still equal the saved original.
+    mov ax,ST_SEG
+    mov es,ax
+    xor bx,bx
+    mov cx,128
+.cache_verify:
+    mov al,[es:bx+ST_SAVE]
+    cmp al,[es:bx+ST_CHECK]
+    ST_CHECK_EQ
+    inc bx
+    loop .cache_verify
+    mov si,st_cache_ok
+    call serial_puts
+
     mov si,st_pass
     call serial_puts
     jmp st_halt
@@ -550,6 +580,7 @@ st_read_ok db 'PASS READ directory ASM86.CMD',13,10,0
 st_key_prompt db 'Press one key for CONIN test: ',0
 st_key_ok db 13,10,'PASS CONIN',13,10,0
 st_write_ok db 'PASS WRITE/READ/RESTORE',13,10,0
+st_cache_ok db 'PASS CACHE PAIR/HIT/WRITE-THROUGH/RELOGIN',13,10,0
 st_write_bad db 'FAIL WRITE verify; restoring...',13,10,0
 st_restore_bad_msg db 'FAIL RESTORE: disposable disk changed',13,10,0
 st_pass db 'PASS CBIOS SELFTEST',13,10,0
