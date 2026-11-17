@@ -30,7 +30,8 @@ required = (
 for token in required:
     assert token.lower() in source.lower(), f"FDFORMAT.A86 missing {token}"
 assert "int     01bh" not in source.lower(), "PC-98 ROM BIOS call leaked into FM-11"
-assert not re.search(r"\b(?:es|cs|ss|ds):\s*\[", source, re.I), ("ASM86 1.1 rejects MASM-style segment-register colon brackets")
+instructions = "\n".join(line.split(";", 1)[0] for line in source.splitlines())
+assert not re.search(r"\b(?:es|cs|ss|ds):\s*\[", instructions, re.I), ("ASM86 1.1 rejects MASM-style segment-register colon brackets")
 assert "mov     Byte Ptr dma_command,0f0h" in source
 assert "msg_low_unsupported" not in source
 assert source.rstrip().endswith("end\n\x1a".rstrip()), "ASM86 source must have END and Ctrl-Z"
