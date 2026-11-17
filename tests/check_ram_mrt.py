@@ -1,10 +1,9 @@
 #!/usr/bin/env python3
-"""Static and model checks for FM-11 CP/M-86 8 KiB RAM probing.
+"""Static/model checks for 8 KiB RAM sizing with destructive readback.
 
-The model follows the emulator's 20-bit bus: missing RAM mirrors
-modulo installed RAM bytes, while the last 4 KiB is read-only ROM.
-The tests verify byte restoration and every 8 KiB capacity from
-128 KiB through 1 MiB. They do not execute CBIOS instructions.
+Test mirrored RAM and unmapped (non-mirrored) high addresses, including
+correct byte restoration, all 113 supported 8 KiB capacities, and the
+final 4 KiB ROM boundary. This does not execute the 8086 instructions.
 """
 from pathlib import Path
 import sys
@@ -25,12 +24,17 @@ for instruction in (
     "mov bx,0x1000",
     "mov cx,120",
     "mov dl,[es:RAM_PROBE_OFF]",
-    "mov byte [es:RAM_PROBE_OFF],0xa5",
-    "cmp byte [RAM_PROBE_OFF],0xa5",
+    "mov byte [es:RAM_PROBE_OFF],0x55",
+    "cmp byte [es:RAM_PROBE_OFF],0x55",
+    "cmp byte [RAM_PROBE_OFF],0x5a",
+    "mov byte [es:RAM_PROBE_OFF],0xaa",
+    "cmp byte [es:RAM_PROBE_OFF],0xaa",
+    "jne .absent",
     "mov [es:RAM_PROBE_OFF],dl",
     "add bx,0x0200",
     "loop .probe",
     "mov word [cs:mrt_tpa_len],0xf700",
+    ".absent:",
     "sub bx,0x0800",
     "mov [cs:mrt_tpa_len],bx",
     "mov [RAM_PROBE_OFF],al",
@@ -53,48 +57,63 @@ assert ANCHOR_PHYS + (FIRST_KIB + (PROBE_COUNT - 1) * 8) * 1024 == 0xFE500
 assert 0xFE500 < ROM_START
 
 
-def simulate(kib):
+def simulate(kib, unpopulated="mirror"):
     capacity = kib * 1024
     ram = bytearray(capacity)
-    # Initialize anchor and each candidate to different bytes,
-    # including targets that wrap into earlier installed RAM.
+    # Give every probed offset a distinct starting value, so corrupting
+    # any read/write candidate is detected even if it is not the anchor.
     for physical in range(ANCHOR_PHYS, ROM_START, 0x2000):
-        ram[physical % capacity] = (physical >> 13) & 0xFF
+        if unpopulated == "mirror" or physical < capacity:
+            ram[physical % capacity] = (physical >> 13) & 0xFF
     before = ram[:]
 
-    previous = ram[ANCHOR_PHYS]
-    ram[ANCHOR_PHYS] = 0x5A
+    def read(physical):
+        if physical >= capacity and unpopulated != "mirror":
+            return 0xFF if unpopulated == "ff" else 0x00
+        return ram[physical % capacity]
+
+    def write(physical, value):
+        if physical >= capacity and unpopulated != "mirror":
+            return
+        ram[physical % capacity] = value
+
+    previous = read(ANCHOR_PHYS)
+    write(ANCHOR_PHYS, 0x5A)
     found_kib = None
 
     for candidate_kib in range(FIRST_KIB, 1024, 8):
         candidate_phys = ANCHOR_PHYS + candidate_kib * 1024
         assert candidate_phys < ROM_START
-        target = candidate_phys % capacity
-        saved = ram[target]
-        ram[target] = 0xA5
-        alias = ram[ANCHOR_PHYS] == 0xA5
-        ram[target] = saved
-        if alias:
+        saved = read(candidate_phys)
+        valid = True
+        for value in (0x55, 0xAA):
+            write(candidate_phys, value)
+            if read(candidate_phys) != value or read(ANCHOR_PHYS) != 0x5A:
+                valid = False
+                break
+        write(candidate_phys, saved)
+        if not valid:
             found_kib = candidate_kib
             break
 
-    ram[ANCHOR_PHYS] = previous
-    assert ram == before, f"{kib} KiB: probe changed RAM contents"
+    write(ANCHOR_PHYS, previous)
+    assert ram == before, f"{kib} KiB ({unpopulated}): probe changed RAM"
     detected_kib = found_kib if found_kib is not None else 1024
     tpa_end = min(detected_kib * 1024, ROM_START) // 16
     return detected_kib, 0x0800, tpa_end - 0x0800
 
 
 for kib in range(128, 1025, 8):
-    detected, start, length = simulate(kib)
-    expected = min(kib * 1024, ROM_START) // 16 - 0x0800
-    assert (detected, start, length) == (kib, 0x0800, expected), (
-        f"{kib} KiB: detected={detected}, MRT=({start:#x},{length:#x}), "
-        f"expected length {expected:#x}"
-    )
+    for unpopulated in ("mirror", "ff", "zero"):
+        detected, start, length = simulate(kib, unpopulated)
+        expected = min(kib * 1024, ROM_START) // 16 - 0x0800
+        assert (detected, start, length) == (kib, 0x0800, expected), (
+            f"{kib} KiB / {unpopulated}: detected={detected}, "
+            f"MRT=({start:#x},{length:#x}), expected length {expected:#x}"
+        )
 
 if len(sys.argv) > 1:
     data = Path(sys.argv[1]).read_bytes()
     assert len(data) == 0x1900, f"unexpected CBIOS size {len(data):#x}"
     assert bytes.fromhex("01 00 08 00 78 00") in data, "missing initial MRT entry"
-print("PASS: 113 RAM capacities (128..1024 KiB, 8 KiB increments), safe ROM bounds, restored RAM and MRT")
+print("PASS: 113 capacities (128..1024 KiB, 8 KiB steps) x mirror/FF/zero absent RAM; probe restores memory and sizes MRT")
