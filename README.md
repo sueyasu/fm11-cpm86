@@ -40,6 +40,44 @@ later switch to TTY or UC1. The ROM preserves an already-ready USART
 to avoid disconnecting an attached serial terminal. An emulator/real
 hardware test is still required to confirm console switching.
 
+## FM-11 native ANSI/VT100 local output
+
+The local CRT half of the CP/M-86 console translates ANSI/VT100 escape
+sequences into the same FM-11 native CHARACTER OUT operations used by
+the NitrOS-9 `fm11console` driver. The `TTY` serial path remains
+byte-for-byte passthrough; `UC1` parses locally while mirroring the
+original unmodified byte to the serial port.
+
+Supported output sequences:
+
+- `ESC [ n A/B/C/D`: move cursor up/down/right/left
+- `ESC [ n E/F`: move to next/previous line, column one
+- `ESC [ row ; col H` and `ESC [ row ; col f`: absolute position
+- `ESC [ n G`, `ESC [ n d`: absolute column/row
+- `ESC [ n J` (0, 1, 2), `ESC [ n K` (0, 1, 2):
+  erase display or line
+- `ESC [ n X`: erase characters without changing cursor position
+- `ESC [ ... m`: SGR reset, bold, blink, reverse, their off-codes,
+  30-37/90-97 foreground colors and 39 default foreground
+- `ESC [ s`, `ESC [ u`, `ESC 7`, `ESC 8`:
+  save and restore cursor position
+- `ESC c`: clear, home and reset rendition
+- `ESC D`, `ESC M`, `ESC E`: index, reverse index and next line
+- `ESC [ ? 25 h/l`: accepted as a no-op, as in the NitrOS-9 driver
+- Native `ESC T`, `ESC Y`, `ESC *`: passed to FM-11 hardware
+
+ANSI screen coordinates are 1-based on an 80x25 display. Native cursor
+position uses FM-11 `12h,X-1,Y-1` and native erases use `ESC T/Y/*`.
+The SGR mapping uses FM-11 `ESC G,attribute`, with RGB index mapping
+matching NitrOS-9; blink appearance depends on renderer support. As in
+the NitrOS-9 driver, unsupported ANSI sequences are consumed, and only
+the first two CSI numeric parameters are interpreted.
+
+`make test` assembles both local and serial CBIOS images, checks the
+fixed `1900h` size, and runs `tests/check_ansi_console.py`.
+An actual guest program that emits the sequences should still be used
+to validate the translated display visually.
+
 ## Native FM-11 local console (8088)
 
 The normal CP/M-86 BIOS now sends `CONOUT` to the FM-11 display
@@ -79,9 +117,7 @@ The serial 2D reset ROM waits for a character on the PTY as before.
 `iplrom_serial.bin`, and `hdd_bootrom_serial.bin` images.
 
 **Current scope:** local character output, common native control bytes
-(CR/LF/home/clear), ASCII, delete and cursor-key input. Full
-ANSI/VT100 output-sequence translation (as implemented in the
-NitrOS-9 local console) is not yet ported. GitHub CI tests assembly,
+(CR/LF/home/clear), ASCII, delete and cursor-key input. ANSI/VT100 output translation is now provided as described above. GitHub CI tests assembly,
 image layout and the protocol statically; an actual 8088 emulator
 boot and keyboard/display test must still be performed.
 
