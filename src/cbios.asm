@@ -118,6 +118,10 @@ INIT:
     ; Initialize the native local 80x25 screen for the cold CCP prompt.
     mov byte [local_key_valid],0
     mov byte [local_seq_count],0
+    mov byte [ansi_state],0
+    mov byte [ansi_row],1
+    mov byte [ansi_col],1
+    mov byte [ansi_attr],7
     mov al,0x16            ; native clear all
     call local_putc
     mov al,0x0b            ; native home
@@ -937,6 +941,7 @@ mrt_tpa_len:
 
 local_hello db 'FM-11 CP/M-86 local console',13,10,0
 %include "src/cbios_local_console.inc"
+%include "src/cbios_ansi.inc"
 
 ; Pad the CBIOS itself (not the optional 0x2500-byte preceding core).
 times BIOS_SIZE - ($ - bios_start) db 0
