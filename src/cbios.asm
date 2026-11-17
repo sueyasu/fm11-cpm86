@@ -411,9 +411,8 @@ init_mrt:
     push bx
     push cx
     push dx
-    push si
     push es
-    mov si,[ram_probe_anchor]
+    mov al,[ram_probe_anchor]
     mov byte [ram_probe_anchor],0x5a
     mov bx,0x2400            ; first candidate: physical 24000h
     mov cx,7                 ; 128,256,...,896 KiB boundaries
@@ -435,9 +434,8 @@ init_mrt:
     sub bx,0x0c00
     mov [mrt_tpa_len],bx
 .done:
-    mov [ram_probe_anchor],si
+    mov [ram_probe_anchor],al
     pop es
-    pop si
     pop dx
     pop cx
     pop bx
