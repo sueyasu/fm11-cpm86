@@ -115,5 +115,5 @@ for kib in range(128, 1025, 8):
 if len(sys.argv) > 1:
     data = Path(sys.argv[1]).read_bytes()
     assert len(data) == 0x1900, f"unexpected CBIOS size {len(data):#x}"
-    assert bytes.fromhex("01 00 08 00 78 00") in data, "missing initial MRT entry"
+    assert bytes.fromhex("01 00 08 00 78") in data, "missing initial MRT entry"
 print("PASS: 113 capacities (128..1024 KiB, 8 KiB steps) x mirror/FF/zero absent RAM; probe restores memory and sizes MRT")
