@@ -2,6 +2,9 @@
 ; Reads sector LBA0-1 with MDC DMA2 into 07C0:0000, then runs IPL.
 ; Built for the emulator --8088-rom option. The original Fujitsu ROM
 ; HDD boot route is not modified by this project.
+%ifndef CONSOLE_LOCAL
+%define CONSOLE_LOCAL 1
+%endif
 cpu 8086
 bits 16
 org 0
@@ -20,7 +23,8 @@ entry:
     out 0x01,al
     mov al,0xff
     out 0x01,al
-    ; USART0 serial attach gate, to avoid early boot before PTY attach.
+    ; Optional serial attach gate; local console must boot without PTY.
+%if CONSOLE_LOCAL = 0
     mov dx,0xfd07
     mov al,0x4e
     out dx,al
@@ -32,6 +36,7 @@ entry:
     jz .wait_input
     mov dx,0xfd06
     in al,dx
+%endif
 
     call hdd_set_binary
     jc fail
