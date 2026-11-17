@@ -370,8 +370,9 @@ experimental firmware, and the CBIOS supports write operations.
 
 ## Installed RAM and dynamic TPA
 
-CBIOS `INIT` detects installed RAM in 128 KiB steps on the current
-FM-11 emulator, and `GETSEGT` returns a dynamically sized MRT.  The
+CBIOS `INIT` probes installed RAM in **8 KiB steps** (128 KiB to 1 MiB)
+on the current FM-11 emulator, and `GETSEGT` returns a dynamically
+sized MRT. Intermediate sizes such as 192 KiB are detected as well.  The
 single TPA region begins at segment `0800h` (physical `08000h`)
 and extends to installed RAM's end, except that the 8088 boot ROM
 at physical `FF000h-FFFFFh` is excluded at 1 MiB.
@@ -391,7 +392,8 @@ The probe modifies no RAM permanently: both the CBIOS anchor and each
 candidate byte are restored after testing.  It assumes the emulator's
 RAM aliasing model; original hardware memory-decode behavior still
 needs verification.  `make test` checks the complete size/region table
-through a model/static regression; **guest runtime testing remains
+at all 113 capacities in 8 KiB increments through a model/static
+regression; **guest runtime testing remains
 necessary**.  The optional CBIOS self-test also prints the computed
 MRT length as `MRT TPA paragraphs=5800` (example for 384 KiB).
 
