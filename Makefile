@@ -95,6 +95,10 @@ boot-2hd: check-core $(BUILD)/fm11_cpm86_boot_2hd.d88
 # resident image. Geometry defaults to M2233B; choose HDD_MODEL=m2243b etc.
 HDD_MODEL ?= m2233b
 
+.PHONY: hdd_image_force
+hdd_image_force:
+
+
 $(BUILD)/cbios_hdd.bin: src/cbios.asm src/cbios_hdd.inc | $(BUILD)
 	$(NASM) -f bin -DBOOT_DRIVE=8 $< -o $@
 
@@ -104,7 +108,7 @@ $(BUILD)/ipl_hdd.bin: src/ipl_hdd.asm src/hdd_boot_io.inc | $(BUILD)
 $(BUILD)/hdd_bootrom.bin: src/hdd_bootrom.asm src/hdd_boot_io.inc | $(BUILD)
 	$(NASM) -f bin $< -o $@
 
-$(BUILD)/fm11_cpm86_boot_hdd.img: $(BUILD)/cbios_hdd.bin $(BUILD)/ipl_hdd.bin tests/build_boot_hdd.py tests/build_boot_2d.py $(CPM86_CORE) $(EXTERNAL_FILES) | $(BUILD)
+$(BUILD)/fm11_cpm86_boot_hdd.img: hdd_image_force $(BUILD)/cbios_hdd.bin $(BUILD)/ipl_hdd.bin tests/build_boot_hdd.py tests/build_boot_2d.py $(CPM86_CORE) $(EXTERNAL_FILES) | $(BUILD)
 	$(PYTHON) tests/build_boot_hdd.py --model $(HDD_MODEL) \
 		--ipl $(BUILD)/ipl_hdd.bin --core $(CPM86_CORE) --cbios $(BUILD)/cbios_hdd.bin \
 		$(foreach f,$(EXTERNAL_FILES),--file $(f)) $@
