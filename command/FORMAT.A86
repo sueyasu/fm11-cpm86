@@ -1167,12 +1167,12 @@ hdd_ty16:
         mov     Word Ptr hdd_cylinders,747
         mov     Byte Ptr hdd_heads,11
 hdd_sense_mode:
-        ; Force CHS mode (command 11h with 60h,0).
+        ; Use binary LBA mode, as the CP/M-86 HDD CBIOS does.
         mov     dx,0fdc0h
         mov     al,011h
         out     dx,al
         mov     dx,0fdc1h
-        mov     al,060h
+        mov     al,070h
         out     dx,al
         xor     al,al
         out     dx,al
@@ -1271,6 +1271,10 @@ hdd_write_sector:
         mov     Byte Ptr hdd_rw,1
         call    hdd_sector_io
         ret
+hdd_read_sector:
+        mov     Byte Ptr hdd_rw,0
+        call    hdd_sector_io
+        ret
 
 hdd_sector_io:
         push    ax
@@ -1295,6 +1299,27 @@ hdd_chs_head_ok:
         jb      hdd_chs_ok
         jmp     hdd_io_bad
 hdd_chs_ok:
+        ; Compute 32-bit physical LBA=((cylinder*heads+head)*32)+sector.
+        ; This is the same binary address used by CBIOS I: and the IPL.
+        mov     ax,Word Ptr hdd_cyl
+        xor     bx,bx
+        mov     bl,Byte Ptr hdd_heads
+        mul     bx
+        xor     bx,bx
+        mov     bl,Byte Ptr hdd_head
+        add     ax,bx
+        adc     dx,0
+        mov     cx,5
+hdd_lba_shift:
+        shl     ax,1
+        rcl     dx,1
+        loop    hdd_lba_shift
+        xor     bx,bx
+        mov     bl,Byte Ptr hdd_sector
+        add     ax,bx
+        adc     dx,0
+        mov     Word Ptr hdd_lba_lo,ax
+        mov     Word Ptr hdd_lba_hi,dx
         ; Two adjacent 256-byte DSEG buffers: choose safe DMA page.
         mov     Word Ptr hdd_dma_ptr,offset sectorbuf
         mov     ax,ds
@@ -1362,7 +1387,7 @@ hdd_mode_ready:
         mov     dx,01ah
         mov     al,2
         out     dx,al
-        ; MDC CHS WRITE command, parameters C/H/S and 256 bytes.
+        ; Binary LBA READ/WRITE command, 256-byte transfer.
         mov     dx,0fdc0h
         mov     al,023h
         cmp     Byte Ptr hdd_rw,0
@@ -1374,15 +1399,16 @@ hdd_command_ready:
         xor     al,al
         out     dx,al              ; drive zero
         out     dx,al              ; unused
-        mov     ax,Word Ptr hdd_cyl
+        mov     ax,Word Ptr hdd_lba_hi
         mov     al,ah
-        out     dx,al              ; cylinder high
-        mov     ax,Word Ptr hdd_cyl
-        out     dx,al              ; cylinder low
-        mov     al,Byte Ptr hdd_head
-        out     dx,al
-        mov     al,Byte Ptr hdd_sector
-        out     dx,al
+        out     dx,al              ; LBA bits 31..24
+        mov     ax,Word Ptr hdd_lba_hi
+        out     dx,al              ; LBA bits 23..16
+        mov     ax,Word Ptr hdd_lba_lo
+        mov     al,ah
+        out     dx,al              ; LBA bits 15..8
+        mov     ax,Word Ptr hdd_lba_lo
+        out     dx,al              ; LBA bits 7..0
         mov     al,1
         out     dx,al              ; transfer 0100h bytes
         xor     al,al
