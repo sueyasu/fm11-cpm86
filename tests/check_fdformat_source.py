@@ -32,6 +32,10 @@ for token in required:
 assert "int     01bh" not in source.lower(), "PC-98 ROM BIOS call leaked into FM-11"
 instructions = "\n".join(line.split(";", 1)[0] for line in source.splitlines())
 assert not re.search(r"\b(?:es|cs|ss|ds):\s*\[", instructions, re.I), ("ASM86 1.1 rejects MASM-style segment-register colon brackets")
+# ASM86 uses a leading dot for a direct memory reference. Without it,
+# 080h becomes an immediate length of 128 rather than the CP/M basepage.
+assert "mov     cl,Byte Ptr .080h" in source
+assert "mov     cl,Byte Ptr 080h" not in source
 assert "mov     bx,BDOS_CURDRV" in source
 assert "mov     al,[bx]" in source
 assert "Byte Ptr [BDOS_CURDRV]" not in source
