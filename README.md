@@ -29,10 +29,11 @@ Only `CONST`, `CONIN`, and `CONOUT` follow CON routing; `LISTOUT` and
 The local console uses native FM-11 character controls rather than
 ANSI/VT100 output parsing.
 
-**Important:** for a normal HDD local-console boot, USART0 must be
-initialized and available before TTY or UC1 can deliver serial output;
-the 2D/2HD IPL already attempts initialization. A separate emulator
-test is needed to validate the serial path after an HDD local boot.
+The HDD reset ROM, like the floppy bootstrap, initializes USART0
+when its transmitter is not already ready, so a local-console boot can
+later switch to TTY or UC1. The ROM preserves an already-ready USART
+to avoid disconnecting an attached serial terminal. An emulator/real
+hardware test is still required to confirm console switching.
 
 ## Native FM-11 local console (8088)
 
