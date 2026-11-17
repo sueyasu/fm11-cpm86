@@ -5,32 +5,39 @@ This is an FM-11 hardware port of the command interface from
 It is a new direct-FDC implementation, not a rename or minor edit of the
 PC-9801 ROM BIOS `INT 1Bh` implementation.
 
-## Current scope and limitations
+## Physical formatting modes
 
-**This revision initializes disks with an already-existing valid physical
-sector layout. It is NOT yet a physical low-level formatter.** The
-`fm11-emulator` currently implements READ SECTOR and WRITE SECTOR,
-but not WRITE TRACK. It cannot construct the ID fields of missing sectors.
-A `D88` created with the correct geometry and filled with E5h is suitable
-as a target. A completely unformatted floppy is **not** supported.
+The FM-11 FDFORMAT now issues the genuine WD17xx **WRITE TRACK (F0h)**
+command on every physical side-track. It constructs address marks,
+sector CHRN fields, data marks, CRC generation tokens, E5h data, and
+4Eh gaps, as in the FM-11 NitrOS-9 formatter. This requires the
+emulator WRITE TRACK implementation.
 
-`FDFORMAT A:` through `FDFORMAT H:` overwrites every existing physical
-sector with E5h, including any system area, then resets BDOS disk state.
-**It destroys all files on the target.**
+- `FDFORMAT B:`: physically format a 2D data disk, including cylinder 0
+  and an empty CP/M directory (all E5h)
+- `FDFORMAT F:`: physically format a 2HD data disk
+- `FDFORMAT /S B:`: format a bootable 2D disk and install IPL/resident
+- `FDFORMAT /S F:`: format a bootable 2HD disk and install IPL/resident
+- `FDFORMAT /L B:`: physically format only; do not install system files
 
-`FDFORMAT /S A:` (or any other drive in the SAME controller family)
-first saves and checks the clean 0x3E00-byte resident image from the
-currently selected system drive, which must be A: or E:. It then
-initializes the target sectors and writes the corresponding 2D/2HD disk
-IPL and saved CCP/BDOS/CBIOS image, verifying all 62 resident sectors.
-2D system sources can target only 2D disks, and 2HD sources only 2HD.
-This restriction is deliberate because the 2D CBIOS cold-starts at A:
-and the 2HD CBIOS at E:. Source resident data is read from disk, **not
-from the executing in-memory CCP/BDOS image**.
+All commands require explicit confirmation and **destroy the entire
+target disk**. The source system resident (0x3E00 bytes) is read
+and checked from the matching A: or E: system disk **before** the
+target is overwritten; a 2D source may install only on another 2D
+disk, and a 2HD source only on 2HD. The resident comes from disk,
+never from the live in-memory CCP/BDOS.
 
-`/L` is deliberately rejected until WRITE TRACK is available in both
-the hardware abstraction and emulator. Existing geometry must be
-correct before either of the supported commands can work.
+The current implementation intentionally accepts only the native
+40x2x16x256 (2D) and 77x2x26x256 (2HD, with C0/H0 128-byte FM)
+geometries. The emulator must have a mounted D88 or raw image with
+the correct drive configuration. WRITE TRACK is not a mechanism for
+creating a new host image from nothing.
+
+Because the 8237 cannot cross a 64-KiB physical DMA page in one
+transfer, FDFORMAT reserves two 10,900-byte alternatives and chooses
+a DMA-safe track buffer. Transfer length is 6,400 bytes for 2D DMA0
+and 10,900 bytes for 2HD DMA1. Only the 2HD boot side-track uses
+128-byte sectors; all other track data uses 256-byte sectors.
 
 ### Drive mapping
 
@@ -39,7 +46,7 @@ correct before either of the supported commands can work.
 | A:..D: | Mini-FDC, 8237 channel 0 | 0..3 | 40 x 2 x 16 x 256 bytes |
 | E:..H: | Standard FDC, 8237 channel 1 | 0..3 | 77 x 2 x 26 x 256 bytes; C0/H0 uses 128-byte FM |
 
-The 2HD special boot track is written in 128-byte physical transfers.
+The 2HD special boot track is physically created as 128-byte FM sectors.
 The resident image begins at C0/H1/S1. On 2D, the boot IPL occupies
 C0/H0/S1-S2, and the resident begins at C0/H0/S3.
 
@@ -78,11 +85,19 @@ round-trip has not yet been performed**; the CI checks only verify the
 IPL bytes and existing NASM/Python build targets. Use disposable media
 for the first tests. Do not use irreplaceable floppy images.
 
-## Future physical formatter
+## Validation
 
-Real WRITE TRACK requires FDC handling of full-track gap, sync, address
-marks, sector ID, data, and CRC sequences, plus corresponding D88
-track reconstruction and immediate persistence. This must be
-implemented and separately tested in `fm11-emulator` before enabling
-low-level formatting here. The NitrOS-9 FORMAT utility provides a
-reference for the 2D/2HD track-image construction.
+The Linux CI tests the generated IPL includes, image layout, and
+FDFORMAT static labels/parameters. The emulator WRITE TRACK path
+was validated separately with C++ unit tests and NitrOS-9 `format`.
+**The FDFORMAT.A86 source still needs to be assembled with the actual
+ASM86/GENCMD toolchain and run on disposable 2D/2HD images.**
+
+## Include arbitrary files in boot images
+
+Place any CP/M **8.3-named regular files** such as `.A86`, `.INC`,
+`.TXT`, `.DAT`, or `.CMD` in `external/commands/`.
+Both `make boot-d88` and `make boot-2hd` automatically include
+these files. `README.md` is excluded as host documentation.
+Filenames must meet CP/M 8.3 naming rules; duplicate names after
+case folding, full disks and full directories cause a build error.
