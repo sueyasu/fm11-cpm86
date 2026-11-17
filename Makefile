@@ -8,7 +8,7 @@ CPM86_CORE ?= external/system/cpm86_core.bin
 # both image builders before a disk image is written.
 EXTERNAL_FILES := $(filter-out external/commands/README.md,$(sort $(wildcard external/commands/*)))
 
-.PHONY: all check-tools check-core bios rom diag cbios-diag boot boot-d88 boot-2hd boot-hdd fdformat-inc selftest check test clean
+.PHONY: all check-tools check-core bios rom diag cbios-diag boot boot-d88 boot-2hd boot-hdd fdformat-inc hddipl-inc selftest check test clean
 all: bios rom check
 
 check-tools:
@@ -53,6 +53,11 @@ command/FDIPL2D.INC: $(BUILD)/ipl_2d.bin command/bin2a86.py
 
 command/FDIPL2HD.INC: $(BUILD)/ipl_2hd.bin command/bin2a86.py
 	$(PYTHON) command/bin2a86.py $< $@ --label fdipl2hd_template --expect-size 512
+
+command/HDIPL.INC: $(BUILD)/ipl_hdd.bin command/bin2a86.py
+	$(PYTHON) command/bin2a86.py $< $@ --label hdipl_template --expect-size 512
+
+hddipl-inc: command/HDIPL.INC
 
 fdformat-inc: command/FDIPL2D.INC command/FDIPL2HD.INC
 
@@ -154,7 +159,7 @@ diag: $(BUILD)/fdc2d_diag.bin
 check: $(BUILD)/cbios.bin $(BUILD)/bootrom.bin
 	$(PYTHON) tests/check_layout.py $(BUILD)/cbios.bin $(BUILD)/bootrom.bin
 
-test: check diag cbios-diag $(BUILD)/iplrom.bin $(BUILD)/test_2hd.d88 $(BUILD)/test_hdd.img $(BUILD)/hdd_bootrom.bin fdformat-inc
+test: check diag cbios-diag $(BUILD)/iplrom.bin $(BUILD)/test_2hd.d88 $(BUILD)/test_hdd.img $(BUILD)/hdd_bootrom.bin fdformat-inc hddipl-inc
 	$(PYTHON) tests/check_boot_2hd.py $(BUILD)/ipl_2hd.bin $(BUILD)/cbios_2hd.bin \
 		$(BUILD)/test_2hd.raw $(BUILD)/test_2hd.d88
 	$(PYTHON) tests/check_fdformat_inc.py $(BUILD)/ipl_2d.bin $(BUILD)/ipl_2hd.bin command/FDIPL2D.INC command/FDIPL2HD.INC
