@@ -21,6 +21,13 @@ assert "sub ax,0x0400" in cache
 # Record translation and both read/write transfer directions
 assert "mov cl,7" in bios
 assert "shl bx,cl" in bios
+# The READ half switches DS from BIOS to its upper-memory cache.
+# DMA variables must be explicitly CS-relative after that switch.
+read_path = bios.split("; READ: track cache -> caller's 128-byte DMA record.",1)[1].split(".write_record:",1)[0]
+assert "mov ds,ax" in read_path
+assert "mov di,[cs:dma_off]" in read_path
+assert "mov ax,[cs:dma_seg]" in read_path
+assert "mov di,[dma_off]" not in read_path
 for name in ("cache_select:", "cache_ensure:", "cache_bit:",
              "cache_copy_in:", "cache_copy_out:", "cache_flush_window:",
              "cache_flush_all:", "cache_mark_dirty:"):
