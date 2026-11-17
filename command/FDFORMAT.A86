@@ -720,7 +720,9 @@ physical_dma_transfer:
         adc     dx,0
         mov     bx,ax
         add     bx,Word Ptr dma_length
-        jc      dt_bad
+        jnc     fdf_dma_page_ok
+        jmp     dt_bad
+fdf_dma_page_ok:
         cmp     dx,15
         jbe     FDF_SKIP_056
         jmp     dt_bad
