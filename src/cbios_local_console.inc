@@ -83,6 +83,10 @@ local_subcall:
 ; Byte to native FM-11 CHARACTER OUT, not ANSI/VT100 passthrough.
 ; Input AL=byte; preserves AX and all other caller registers.
 local_putc:
+    jmp ansi_putc
+
+; Uninterpreted native character/command byte for the ANSI translator.
+local_native_putc:
     push ax
     mov ah,al
     mov al,SUB_CHAROUT
