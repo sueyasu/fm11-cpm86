@@ -447,7 +447,9 @@ PS_SKIP_011:
         ret
 ps_next:
         inc     si
-        loop    ps_scan
+        dec     cx
+        jz      ps_bad
+        jmp     ps_scan
 ps_bad:
         stc
         ret
