@@ -53,5 +53,5 @@ for dtype, cylinders, heads in geometries:
     assert 1 < blocks < 65536
     assert heads >= 2  # 16KiB directory fits at start of cylinder 1
 assert max(c*h*32*256 for _,c,h in geometries) == 67313664
-assert source.rstrip().endswith("end\n\x1a".rstrip())
+assert source.rstrip("\r\n\x1a").endswith("end")
 print("PASS: FORMAT A:..I:/HDD, nine MDC geometries, DMA2, directory and ASM86 source checks")
