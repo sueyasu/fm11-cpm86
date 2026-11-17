@@ -256,7 +256,9 @@ FDF_SKIP_016:
         cmp     ah,'D'
         jne     fmt_pt_letter
         cmp     Byte Ptr target_drive,0ffh
-        jne     pt_bad
+        je      fmt_pt_hdd_free
+        jmp     pt_bad
+fmt_pt_hdd_free:
         mov     Byte Ptr target_drive,HDD_DRIVE
         add     si,3
         sub     cx,3
@@ -1057,7 +1059,9 @@ hdd_sense:
         out     dx,al
         out     dx,al
         call    hdd_result_wait
-        jc      hdd_sense_bad
+        jnc     hdd_sense_present
+        jmp     hdd_sense_bad
+hdd_sense_present:
         mov     al,Byte Ptr hdd_result+4
         cmp     al,004h
         jne     hdd_ty08
@@ -1256,10 +1260,13 @@ hdd_chs_ok:
         add     ax,offset sectorbuf+256
         adc     dx,0
         cmp     ax,0ff00h
-        ja      hdd_io_bad
+        jbe     hdd_buf_safe
+        jmp     hdd_io_bad
 hdd_buf_safe:
         cmp     dx,15
-        ja      hdd_io_bad
+        jbe     hdd_addr_ok
+        jmp     hdd_io_bad
+hdd_addr_ok:
         mov     Word Ptr hdd_dma_addr,ax
         mov     Byte Ptr hdd_dma_bank,dl
         cmp     Byte Ptr hdd_rw,0
