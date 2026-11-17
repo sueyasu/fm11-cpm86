@@ -163,7 +163,7 @@ parse_tail:
         mov     Byte Ptr target_drive,0ffh
         mov     Byte Ptr mode,MODE_DATA
         xor     cx,cx
-        mov     cl,Byte Ptr 080h
+        mov     cl,Byte Ptr .080h
         mov     si,081h
 pt_loop:
         or      cx,cx
