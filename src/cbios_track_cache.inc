@@ -60,7 +60,6 @@ cache_select:
     xor si,si
 .search:
     mov al,1
-    mov al,1
     mov cx,si
     shl al,cl
     test byte [cache_used],al
