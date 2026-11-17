@@ -599,7 +599,7 @@ fdc2d_transfer:
     pop ax
     ret
 
-%include "cbios_hdd.inc"
+%include "src/cbios_hdd.inc"
 
 ; DMA bounce buffer, never exposed as a logical CP/M record.
 fdc_channel db 0
