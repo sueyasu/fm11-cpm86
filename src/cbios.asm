@@ -99,6 +99,7 @@ INIT:
     ; Before giving BDOS the memory region table, detect installed RAM.
     ; Keep 0400h:0000h-3FFFh resident and all probing side-effect-free.
     call init_mrt
+    call cache_init             ; reserve two 8 KiB windows above TPA
 %if CONSOLE_LOCAL
     ; Keep the BOOT_DRIVE immediate at its on-disk patchable BIOS offset
     ; without requiring USART0 to be ready for a local-screen cold boot.
@@ -138,8 +139,20 @@ INIT:
 %endif
 
 WBOOT:
-    mov byte [cs:cache_valid],0 ; entry DS may not equal BIOS CS
+    push ds
+    push cs
+    pop ds
+    call cache_flush_all
+    pop ds
+    jc .sync_failed
     jmp 0x0006           ; provisional: disk reload not implemented
+.sync_failed:
+    ; WBOOT has no status return; never claim a successful warm boot
+    ; while dirty sectors could not be committed.
+    cli
+.halt:
+    hlt
+    jmp .halt
 
 CONST:
     ; Preserve AH, DX and all non-result registers.
@@ -346,10 +359,18 @@ SELDSK:
     shl bx,1
     mov bx,[dph_table+bx]
     mov [cur_disk],cl
-    ; First login can follow a media change: never reuse an old sector.
+    ; Preserve dirty data before treating a first login as a media change.
+    ; An unsuccessful flush must not silently discard cached writes.
     test dl,1
     jnz .absent
+    push bx
+    call cache_flush_all
+    pop bx
+    jc .flush_failed
     call cache_invalidate
+    jmp .absent
+.flush_failed:
+    xor bx,bx             ; report failure to select the drive
 .absent:
     ret
 
@@ -370,9 +391,9 @@ SETDMAB:
     ret
 
 ; CP/M-86 128-byte record I/O, shared by all 2D/2HD/HDD drives.
-; The 256-byte bounce buffer is a write-through single-sector cache:
-; two logical halves of one physical sector share one physical READ.
-; Every WRITE still commits the whole physical sector immediately.
+; Two 8 KiB windows hold lazy-filled 256-byte sectors from two
+; different tracks; dirty physical sectors are written back on
+; eviction, first-login, WBOOT and directory WRITE (CL=1).
 READ:
 %ifdef CBIOS_SELFTEST
     mov byte [cs:st_rw_entry],1 ; proves the direct CALL reached READ
@@ -398,6 +419,7 @@ rw_2d:
     pop ds                  ; BIOS variables and bounce buffer use CS
     push cs
     pop es
+    mov [cache_write_type],cl    ; CP/M-86 WRITE type in CL (1=directory)
 %ifdef CBIOS_SELFTEST
     mov byte [cs:st_rw_entry],3 ; segment setup/prologue completed
     mov [cs:st_rw_ds],ds
@@ -453,51 +475,57 @@ rw_2d:
 %ifdef CBIOS_SELFTEST
     mov byte [st_rw_path],3      ; input accepted; disk access follows
 %endif
-    call cache_ensure       ; physical READ only on cache miss
+    ; Directory metadata must never precede dirty file data on disk.
+    test bp,0x0100
+    jz .load
+    cmp byte [cache_write_type],1
+    jne .load
+    call cache_flush_all
     jc .error
-.copy_record:
-    ; Each physical sector holds two 128-byte CP/M records.
-    ; Recompute the half selector independently of the transport.
+.load:
+    call cache_ensure
+    jc .error
+    ; The record's byte offset inside the cached track is sector*128.
     mov bx,[cur_sector]
-    and bx,1
-    shl bx,1
-    shl bx,1
-    shl bx,1
-    shl bx,1
-    shl bx,1
-    shl bx,1
-    shl bx,1                ; byte offset of the selected half
+    mov cl,7
+    shl bx,cl
+    mov si,[cache_slot]
+    shl si,1
+    mov ax,[cache_segments+si]
     cld
     test bp,0x0100
-    jnz .write_half
+    jnz .write_record
 
-    ; READ: BIOS buffer -> selected caller DMA segment:offset.
-    mov si,fdc2d_buffer
-    add si,bx
+    ; READ: track cache -> caller's 128-byte DMA record.
+    mov ds,ax
+    mov si,bx
     mov di,[dma_off]
-    mov ax,[dma_seg]
+    mov ax,[cs:dma_seg]
     mov es,ax
     mov cx,64
     rep movsw
-    jmp short .success
+    push cs
+    pop ds
+    jmp .success
 
-.write_half:
-    ; Update the matching half, retain the other 128 bytes in cache.
+.write_record:
+    ; WRITE: caller DMA -> selected half of the 8 KiB track buffer.
+    mov es,ax
+    mov di,bx
     mov si,[dma_off]
-    mov di,fdc2d_buffer
-    add di,bx
     mov ax,[dma_seg]
     mov ds,ax
     mov cx,64
     rep movsw
     push cs
     pop ds
-    call sector_physical_write
-    jnc .success
-    ; A failed or partial physical WRITE invalidates cache contents:
-    ; force the next operation to re-read the real medium.
-    call cache_invalidate
-    jmp .error
+    call cache_mark_dirty
+    cmp byte [cache_write_type],1
+    jne .success
+    ; Directory WRITE is the transaction commit point: write all
+    ; file data first (above), then the updated directory sector.
+    call cache_flush_all
+    jc .error
 .success:
     xor ax,ax               ; CP/M-86 success: clear full AX, not only AL.
     jmp short .done
@@ -814,7 +842,7 @@ fdc2d_transfer:
     ret
 
 %include "src/cbios_hdd.inc"
-%include "src/cbios_sector_cache.inc"
+%include "src/cbios_track_cache.inc"
 
 ; DMA bounce buffer, never exposed as a logical CP/M record.
 fdc_channel db 0
