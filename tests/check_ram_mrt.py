@@ -11,6 +11,10 @@ import sys
 source = Path("src/cbios.asm").read_text()
 init = source.split("\nINIT:\n", 1)[1].split("\nWBOOT:\n", 1)[0]
 assert "call init_mrt" in init
+assert "call cache_init" in init
+assert init.index("call init_mrt") < init.index("call cache_init")
+cache = Path("src/cbios_track_cache.inc").read_text()
+assert "sub ax,0x0400" in cache and "add ax,0x0200" in cache
 assert init.index("call init_mrt") < init.index("jmp 0x0000")
 section = source.split("\ninit_mrt:\n", 1)[1].split("\nGETIOBF:\n", 1)[0]
 for instruction in (
@@ -111,9 +115,17 @@ for kib in range(128, 1025, 8):
             f"{kib} KiB / {unpopulated}: detected={detected}, "
             f"MRT=({start:#x},{length:#x}), expected length {expected:#x}"
         )
+        # cache_init reduces the published MRT length by 0400h
+        # paragraphs, then places two independent 8 KiB windows above it.
+        final_length = length - 0x0400
+        first_window = (start + final_length) * 16
+        second_window = first_window + 8192
+        assert final_length >= 0x1400  # 80 KiB TPA on 128 KiB FM-11
+        assert first_window == min(kib*1024, ROM_START) - 16384
+        assert second_window + 8192 == min(kib*1024, ROM_START)
 
 if len(sys.argv) > 1:
     data = Path(sys.argv[1]).read_bytes()
     assert len(data) == 0x1900, f"unexpected CBIOS size {len(data):#x}"
     assert bytes.fromhex("01 00 08 00 78") in data, "missing initial MRT entry"
-print("PASS: 113 capacities (128..1024 KiB, 8 KiB steps) x mirror/FF/zero absent RAM; probe restores memory and sizes MRT")
+print("PASS: 113 RAM capacities, no probe corruption, 16 KiB cache reservation above MRT TPA")
