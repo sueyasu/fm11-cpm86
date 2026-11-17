@@ -389,7 +389,9 @@ sr_error:
 patch_system_boot_drive:
         mov     si,offset system_image+02500h
         cmp     Byte Ptr [si],0e9h
-        jne     ps_bad
+        je      PS_SKIP_001
+        jmp     ps_bad
+PS_SKIP_001:
         mov     bx,[si+1]
         add     bx,02503h
         add     bx,offset system_image
@@ -397,27 +399,47 @@ patch_system_boot_drive:
         mov     cx,96
 ps_scan:
         cmp     Byte Ptr [si],0b9h
-        jne     ps_next
+        je      PS_SKIP_002
+        jmp     ps_next
+PS_SKIP_002:
         mov     al,[si+1]
         cmp     al,0
-        je      ps_candidate
+        jne      PS_SKIP_003
+        jmp     ps_candidate
+PS_SKIP_003:
         cmp     al,4
-        jne     ps_next
+        je      PS_SKIP_004
+        jmp     ps_next
+PS_SKIP_004:
 ps_candidate:
         cmp     Byte Ptr [si+2],0
-        jne     ps_next
+        je      PS_SKIP_005
+        jmp     ps_next
+PS_SKIP_005:
         cmp     Byte Ptr [si+3],088h
-        jne     ps_next
+        je      PS_SKIP_006
+        jmp     ps_next
+PS_SKIP_006:
         cmp     Byte Ptr [si+4],00eh
-        jne     ps_next
+        je      PS_SKIP_007
+        jmp     ps_next
+PS_SKIP_007:
         cmp     Byte Ptr [si+7],088h
-        jne     ps_next
+        je      PS_SKIP_008
+        jmp     ps_next
+PS_SKIP_008:
         cmp     Byte Ptr [si+8],00eh
-        jne     ps_next
+        je      PS_SKIP_009
+        jmp     ps_next
+PS_SKIP_009:
         cmp     Byte Ptr [si+9],0b7h
-        jne     ps_next
+        je      PS_SKIP_010
+        jmp     ps_next
+PS_SKIP_010:
         cmp     Byte Ptr [si+10],024h
-        jne     ps_next
+        je      PS_SKIP_011
+        jmp     ps_next
+PS_SKIP_011:
         mov     al,Byte Ptr target_drive
         and     al,4
         mov     [si+1],al
