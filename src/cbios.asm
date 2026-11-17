@@ -399,8 +399,10 @@ GETSEGT:
 ; rather than a late CBIOS variable: the highest probe at physical
 ; FE500h must stay below the FF000h ROM overlay without 20-bit wrap.
 ; Every candidate, starting at physical 10500h, lies in TPA RAM.
-; Save and restore the byte at both addresses even if the probe aliases
-; RAM, with DS/ES and all caller-visible registers preserved.
+; Test two independent byte patterns (55h, AAh) and reject any
+; candidate that fails either readback or changes the resident anchor.
+; Restore the byte at both addresses even if the probe aliases RAM,
+; with DS/ES and all caller-visible registers preserved.
 ;
 ; MRT entry is one region beginning at segment 0800h (physical 08000h).
 ; It ends at installed RAM's boundary, or FF000h for a full 1 MiB.
@@ -420,13 +422,28 @@ init_mrt:
     mov cx,120              ; 64,72,...,1016 KiB boundaries
 .probe:
     mov es,bx
-    mov dl,[es:RAM_PROBE_OFF]
-    mov byte [es:RAM_PROBE_OFF],0xa5
-    cmp byte [RAM_PROBE_OFF],0xa5
+    mov dl,[es:RAM_PROBE_OFF] ; save byte before the destructive checks
+    mov byte [es:RAM_PROBE_OFF],0x55
+    cmp byte [es:RAM_PROBE_OFF],0x55
+    jne .absent
+    cmp byte [RAM_PROBE_OFF],0x5a
+    jne .absent             ; candidate aliases the resident anchor
+    mov byte [es:RAM_PROBE_OFF],0xaa
+    cmp byte [es:RAM_PROBE_OFF],0xaa
+    jne .absent
+    cmp byte [RAM_PROBE_OFF],0x5a
+    jne .absent
+    ; Both patterns read back and neither changed the anchor.
     mov [es:RAM_PROBE_OFF],dl
-    je .found
     add bx,0x0200           ; next 8 KiB block (512 paragraphs)
     loop .probe
+    jmp short .full
+.absent:
+    ; Unwritable/open-bus memory OR the first mirror ends usable RAM.
+    ; Restore even when this address aliases the anchor.
+    mov [es:RAM_PROBE_OFF],dl
+    jmp short .found
+.full:
     ; No alias through 1016 KiB: full 1 MiB, except the top 4 KiB ROM.
     mov word [cs:mrt_tpa_len],0xf700
     jmp short .done
