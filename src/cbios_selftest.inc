@@ -139,6 +139,14 @@ selftest_entry:
     ST_CHECK_EQ
     cmp word [bx+1],ST_SEG
     ST_CHECK_EQ
+    ; Report actual post-INIT MRT length in paragraphs for testing
+    ; different emulator RAM capacities (1800h..F700h).
+    mov si,st_mrt_length
+    call serial_puts
+    mov ax,[bx+3]
+    call st_hex_word
+    mov si,st_crlf
+    call serial_puts
     mov si,st_set_ok
     call serial_puts
 
@@ -482,6 +490,7 @@ st_title db 13,10,'CBIOS SELFTEST (NO CCP/BDOS)',13,10,0
 st_console_ok db 13,10,'PASS CONOUT/LISTOUT/PUNCH/CONST/LISTST',13,10,0
 st_io_ok db 'PASS GETIOBF/SETIOBF',13,10,0
 st_dph_ok db 'PASS SELDSK/DPH/DPB',13,10,0
+st_mrt_length db 'MRT TPA paragraphs=',0
 st_set_ok db 'PASS SETTRK/HOME/SETSEC/SETDMA/SETDMAB/SECTRAN/GETSEGT',13,10,0
 st_limits_ok db 'PASS READ invalid track/record',13,10,0
 st_bad_track db 'FAIL READ track=80 returned AX=',0
