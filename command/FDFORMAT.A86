@@ -722,10 +722,6 @@ physical_dma_transfer:
         add     bx,Word Ptr dma_length
         jc      dt_bad
         cmp     dx,15
-        jbe     FDF_SKIP_055
-        jmp     dt_bad
-FDF_SKIP_055:
-        cmp     dx,15
         jbe     FDF_SKIP_056
         jmp     dt_bad
 FDF_SKIP_056:
@@ -777,7 +773,7 @@ dt_bank:
 
         mov     dx,01bh
         mov     al,044h
-        cmp     Byte Ptr io_write,0
+        cmp     Byte Ptr dma_write,0
         jne     FDF_SKIP_060
         jmp     dt_mode
 FDF_SKIP_060:
