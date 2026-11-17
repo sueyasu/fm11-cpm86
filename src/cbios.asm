@@ -17,9 +17,9 @@ BIOS_SIZE    equ 0x1900
 %ifndef BOOT_DRIVE
 %define BOOT_DRIVE 0             ; 2D=A:, 2HD=E:, HDD=I: (8)
 %endif
-; Native screen/keyboard console is the normal FM-11 configuration.
-; CBIOS_SELFTEST remains serial to preserve existing diagnostic behavior.
-; Build with -DCONSOLE_LOCAL=0 to retain the original serial console.
+; The boot-time default IOBYTE selects the initial console; after boot,
+; STAT CON:=TTY:/CRT:/UC1: can change it without rebuilding the BIOS.
+; CBIOS_SELFTEST still defaults to serial for diagnostic compatibility.
 %ifndef CONSOLE_LOCAL
 %ifdef CBIOS_SELFTEST
 %define CONSOLE_LOCAL 0
@@ -87,6 +87,14 @@ INIT:
     mov word [cur_sector],0
     mov word [dma_off],0x0080
     mov [dma_seg],cs
+    ; Console field of the CP/M-86 IOBYTE (bits 1:0):
+    ; 00 TTY (USART0), 01 CRT (local), 10 BAT (TTY fallback),
+    ; 11 UC1 (local input, mirrored CRT+TTY output).
+%if CONSOLE_LOCAL
+    mov byte [iobyte],1
+%else
+    mov byte [iobyte],0
+%endif
     ; Before giving BDOS the memory region table, detect installed RAM.
     ; Keep 0400h:0000h-3FFFh resident and all probing side-effect-free.
     call init_mrt
@@ -128,55 +136,86 @@ WBOOT:
     jmp 0x0006           ; provisional: disk reload not implemented
 
 CONST:
-%if CONSOLE_LOCAL
-    ; CONST returns status only in AL, preserving the caller's AH.
+    ; Preserve AH, DX and all non-result registers.
+    ; The IOBYTE CON field is bits 1:0; BAT (10b) uses TTY.
     push bx
     mov bh,ah
-    call local_const
-    mov ah,bh
-    pop bx
-    ret
-%else
-    ; Preserve DX: FM-11 I/O requires the DX-form IN instruction.
+    mov al,[iobyte]
+    and al,3
+    cmp al,1                 ; CRT
+    je .local
+    cmp al,3                 ; UC1: local keyboard
+    je .local
     push dx
     mov dx,SER_STATUS
     in al,dx
     test al,SER_RX_READY
     mov al,0
-    jz .done
+    jz .serial_done
     dec al
-.done:
+.serial_done:
     pop dx
-    ret
-%endif
-
-CONIN:
-%if CONSOLE_LOCAL
-    ; CONIN also preserves AH and all registers other than return AL.
-    push bx
-    mov bh,ah
-    call local_conin
+    jmp short .done
+.local:
+    call local_const
+.done:
     mov ah,bh
     pop bx
     ret
-%else
-    call CONST
-    or al,al
-    jz CONIN
+
+CONIN:
+    ; TTY/BAT read USART0; CRT/UC1 read the local keyboard.
+    push bx
+    mov bh,ah
+    mov al,[iobyte]
+    and al,3
+    cmp al,1
+    je .local
+    cmp al,3
+    je .local
+.serial_wait:
+    push dx
+    mov dx,SER_STATUS
+    in al,dx
+    test al,SER_RX_READY
+    pop dx
+    jz .serial_wait
     push dx
     mov dx,SER_DATA
     in al,dx
     pop dx
+    jmp short .done
+.local:
+    call local_conin
+.done:
+    mov ah,bh
+    pop bx
     ret
-%endif
 
 CONOUT:
+    ; CONOUT uses CL as in the CP/M-86 CBIOS ABI.
+    ; UC1 mirrors output; a stalled/absent serial port must not stall CRT.
+    push ax
+    mov al,[iobyte]
+    and al,3
+    cmp al,1
+    je .local
+    cmp al,3
+    je .mirror
     mov al,cl
-%if CONSOLE_LOCAL
+    call serial_putc         ; TTY or BAT fallback
+    jmp short .done
+.local:
+    mov al,cl
     call local_putc
-%else
-    call serial_putc
-%endif
+    jmp short .done
+.mirror:
+    mov al,cl
+    call local_putc
+    mov al,cl
+    call serial_putc_mirror
+.done:
+    pop ax
     ret
 
 LISTOUT:
@@ -207,6 +246,31 @@ serial_putc:
     mov dx,SER_DATA
     out dx,al
     pop dx
+    ret
+
+; Best-effort serial output for mirrored UC1 (no unbounded wait).
+; Preserves all registers and skips serial output if TXRDY never appears.
+serial_putc_mirror:
+    push ax
+    push cx
+    push dx
+    mov ah,al
+    mov dx,SER_STATUS
+    mov cx,0xffff
+.wait:
+    in al,dx
+    test al,SER_TX_READY
+    jnz .ready
+    loop .wait
+    jmp short .done
+.ready:
+    mov dx,SER_DATA
+    mov al,ah
+    out dx,al
+.done:
+    pop dx
+    pop cx
+    pop ax
     ret
 
 serial_puts:
@@ -525,7 +589,7 @@ SETIOBF:
 
 hello db 'FM-11 CP/M-86 BIOS: serial initialized',13,10,0
 cur_disk db 0
-iobyte db 0
+iobyte db 0                ; initialized in INIT; full byte kept for STAT
 cur_track dw 0
 cur_sector dw 0
 dma_off dw 0x80
@@ -834,10 +898,8 @@ mrt:
 mrt_tpa_len:
     dw 0x7800
 
-%if CONSOLE_LOCAL
 local_hello db 'FM-11 CP/M-86 local console',13,10,0
 %include "src/cbios_local_console.inc"
-%endif
 
 ; Pad the CBIOS itself (not the optional 0x2500-byte preceding core).
 times BIOS_SIZE - ($ - bios_start) db 0
