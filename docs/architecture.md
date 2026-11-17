@@ -155,11 +155,25 @@ records, numbering 0..31 on each logical side-track (0..79).  The
 logical-to-physical mapping is cylinder = track / 2, head = track % 2,
 sector = record / 2 + 1, half-sector = record % 2.  A read transfers
 the selected half of `fdc2d_buffer` to the caller's DMA segment:offset.
-A write always reads the full 256-byte sector first, replaces the
-selected half with the caller's 128-byte record, and writes the full
-sector back.  This preserves the other 128-byte record without a
-dirty-sector cache or deferred flush.  Both operations return AL=0 on
-success and AL=1 on error.
+A physical-sector miss reads a complete 256-byte sector into
+`fdc2d_buffer`. The cache key consists of drive, logical side-track and
+0-based physical-sector index, shared across 2D/2HD/HDD.
+A hit on either logical 128-byte half reuses the buffer without another
+physical READ. A WRITE replaces only the selected half and **always**
+issues a complete 256-byte physical WRITE (write-through), retaining
+the other half. A failed WRITE invalidates the cache; a failed READ never
+publishes a valid key. A first-login SELDSK (DL bit 0 clear), INIT and
+WBOOT invalidate it as well. This is a one-sector global cache, not
+yet a per-drive track cache; it never holds dirty data and needs no flush.
+
+The common deblocking/transport layer lives in `src/cbios_sector_cache.inc`;
+`fdc2d_read/write` and `hdd_read/write` remain the physical transport.
+The dedicated CBIOS self-test checks paired record READ hits, zero
+extra physical READs on a cached WRITE, one physical WRITE on commit,
+re-login invalidation and original-data restoration.  `make test`
+checks static invariants and the image/CBIOS layout; the guest self-test
+must still be run on a disposable disk to validate real FDC traffic.
+Both logical operations return AX=0 on success and AX=1 on error.
 
 **2HD implementation:** Standard-FDC drives 0..3 use DMA channel 1,
 FD30h..FD35h, 26 physical sectors per side-track and 52 CP/M records.
@@ -171,9 +185,9 @@ IPL, and 62x256-byte resident sectors from C0/H1 onward. The 2HD
 CBIOS variant starts the CCP on E: rather than A:.
 
 **Limitations:** Full emulator-level runtime validation of CP/M-86
-2HD boot and all eight drives is still outstanding.  Each record write
-performs a physical read and write.  No retry, media-change detection,
-or real-hardware timing validation is implemented.  The bounce buffer
+2HD boot and all eight drives is still outstanding.  A record WRITE always performs a physical WRITE but a preceding
+physical READ is avoided when its sector is cached. No retry, automatic
+media-change detection, or real-hardware timing validation is implemented.  The bounce buffer
 is checked against the 8237 64 KiB page boundary, and the caller DMA
 offset is checked for 128-byte segment wrapping.  An IPL must
 establish the final resident segment and validate memory ownership.
