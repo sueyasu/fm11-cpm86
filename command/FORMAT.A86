@@ -33,7 +33,6 @@ FMT_ALT        equ     FMT_TRACK2HD
 FMT_64K_LIMIT  equ     65536-FMT_MAX
 HDD_DRIVE      equ     8
 HDD_DMA_LIMIT  equ     0ff00h
-HDD_SECTOR     equ     256
 HDD_SPT        equ     32
 HDD_DMA_CH     equ     2
 
