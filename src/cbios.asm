@@ -1,6 +1,6 @@
 ; FM-11 CP/M-86 v1.1 experimental CBIOS.
 ; Resident core ABI and vector layout originate from sueyasu/pc98_cpm86.
-; A:..D: use Mini-FDC (2D), E:..H: use standard FDC (2HD), 128-byte records.
+; A:..D: 2D, E:..H: 2HD, I: whole MDC HDD, 128-byte records.
 ; IPL/cold-boot and file-level CP/M-86 compatibility are not yet verified.
 cpu 8086
 bits 16
@@ -15,7 +15,7 @@ SER_RX_READY equ 0x02
 SER_TX_READY equ 0x01
 BIOS_SIZE    equ 0x1900
 %ifndef BOOT_DRIVE
-%define BOOT_DRIVE 0             ; 2D FDD0=A:, 2HD FDD0=E:
+%define BOOT_DRIVE 0             ; 2D=A:, 2HD=E:, HDD=I: (8)
 %endif
 BIOS_WORK    equ 0x3E00
 BIOS_STACK   equ BIOS_WORK+0x0200 ; 0400h:4000h ends below TPA 0800h
@@ -169,8 +169,15 @@ SELDSK:
     ; CL=0..7: A:..D: 2D units 0..3; E:..H: 2HD units 0..3.
     ; DL bit 0 = 0 on first login, 1 if previously logged in.
     xor bx,bx
-    cmp cl,8
+    cmp cl,9
     jae .absent
+    cmp cl,8
+    jne .table
+    push cx
+    call hdd_sense
+    pop cx
+    jc .absent
+.table:
     xor ch,ch
     mov bx,cx
     shl bx,1
@@ -230,13 +237,16 @@ rw_2d:
 
     mov bx,[cur_track]
     cmp byte [cur_disk],8
-    jae .invalid
+    je .hdd_track
+    ja .invalid
     cmp byte [cur_disk],4
     jb .check_2d_track
     cmp bx,154              ; 2HD: 77 cylinders * 2 side-tracks
     jmp .track_checked
 .check_2d_track:
     cmp bx,80               ; 2D: 40 cylinders * 2 side-tracks
+.hdd_track:
+    cmp bx,[hdd_total_tracks]
 .track_checked:
 %ifdef CBIOS_SELFTEST
     ; Diagnostic only. PUSHF/POP memory preserve CMP FLAGS for JAE;
@@ -248,12 +258,16 @@ rw_2d:
 %endif
     jae .invalid
     mov bx,[cur_sector]
+    cmp byte [cur_disk],8
+    je .hdd_sector
     cmp byte [cur_disk],4
     jb .check_2d_sector
     cmp bx,52               ; 2HD: 26 * 2 logical records
     jmp .sector_checked
 .check_2d_sector:
     cmp bx,32               ; 2D: 16 * 2 logical records
+.hdd_sector:
+    cmp bx,64
 .sector_checked:
     jae .invalid
     mov bx,[dma_off]
@@ -269,6 +283,14 @@ rw_2d:
 %ifdef CBIOS_SELFTEST
     mov byte [st_rw_path],3      ; input accepted; disk access follows
 %endif
+    cmp byte [cur_disk],8
+    jne .floppy_read
+    mov bx,[cur_sector]
+    and bx,1
+    call hdd_read
+    jc .error
+    jmp .copy_record
+.floppy_read:
     ; Translate side-track and logical record to physical CHS.
     mov bx,[cur_track]
     mov dx,bx
@@ -284,7 +306,7 @@ rw_2d:
     mov al,[cur_disk]
     call fdc2d_read
     jc .error
-
+.copy_record:
     ; BX is preserved by the physical sector routine: 0/1 half selector.
     ; 8086 only permits an immediate shift count of one.
     ; Do not use CL here: it still holds the sector number for WRITE.
@@ -326,6 +348,12 @@ rw_2d:
     push cs
     pop ds
     mov al,[cur_disk]
+    cmp al,8
+    jne .floppy_write
+    call hdd_write
+    jc .error
+    jmp .success
+.floppy_write:
     call fdc2d_write
     jc .error
 .success:
@@ -569,6 +597,8 @@ fdc2d_transfer:
     pop ax
     ret
 
+%include "cbios_hdd.inc"
+
 ; DMA bounce buffer, never exposed as a logical CP/M record.
 fdc_channel db 0
 fdc2d_buffer: times 256 db 0
@@ -577,7 +607,7 @@ fdc2d_buffer: times 256 db 0
 ; Every DPH has private CSV/ALV, using a shared 128-byte directory buffer.
 ; See docs/architecture.md for the provisional 2D filesystem layout.
 dph_table:
-    dw dph0,dph1,dph2,dph3,dph4,dph5,dph6,dph7
+    dw dph0,dph1,dph2,dph3,dph4,dph5,dph6,dph7,dph8
 
 dph0:
     dw 0,0,0,0
@@ -603,6 +633,9 @@ dph6:
 dph7:
     dw 0,0,0,0
     dw dirbuf,dpb_2hd,csv7,alv7
+dph8:
+    dw 0,0,0,0
+    dw dirbuf,dpb_hdd,0,alv8
 
 ; 40 cylinders * 2 sides * 16 sectors * 256 bytes = 320 KiB.
 ; One CP/M logical track is one side: 32 * 128-byte records.
@@ -630,6 +663,18 @@ dpb_2hd:
     dw 16                 ; CKS
     dw 4                  ; OFF: four reserved side-tracks
 
+; I: whole HDD, 32x256 physical sectors per head-track.
+; 64 logical 128-byte records; reserve first cylinder (OFF=heads).
+; 16-KiB allocation blocks, 512 directory entries; sensed DSM.
+dpb_hdd:
+    dw 64
+    db 7,127,7
+    dw 0                     ; DSM filled from sense
+    dw 511                   ; 512 directory entries
+    db 0x80,0
+    dw 0                     ; no checksum vector on fixed disk
+    dw 0                     ; OFF filled from heads
+
 dirbuf: times 128 db 0
 csv0: times 16 db 0
 csv1: times 16 db 0
@@ -647,6 +692,7 @@ alv4: times 31 db 0
 alv5: times 31 db 0
 alv6: times 31 db 0
 alv7: times 31 db 0
+alv8: times 514 db 0        ; maximum ~4103 allocation blocks
 
 ; Memory region table is provisional and must be validated before boot.
 mrt:
