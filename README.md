@@ -45,6 +45,36 @@ physical 2HD FDD0 with current drive E:.
 
 See [the 2HD disk layout](docs/boot-2hd.md) for details.
 
+## Unified FORMAT.CMD (floppy and whole HDD)
+
+`command/FORMAT.A86` unifies the previously tested floppy `FDFORMAT`
+behavior and the single MDC HDD as `I:` or `HDD`.
+
+```text
+FORMAT B:
+FORMAT F: /S
+FORMAT HDD
+FORMAT I: /S
+```
+
+For floppies, the original `/S` and `/L` modes remain. For the HDD,
+`/S` creates a bootable whole-disk CP/M-86 image (HDD IPL at LBA0-1,
+resident at LBA2-63); without `/S`, it initializes the reserved
+cylinder and 16-KiB directory. `FORMAT HDD /L` is refused because the
+MDC does not offer physical track formatting.
+
+```sh
+make format-inc
+make test
+```
+
+Transfer `FORMAT.A86`, `FDIPL2D.INC`, `FDIPL2HD.INC`,
+and `HDIPL.INC` to CP/M-86 and run `ASM86 FORMAT.A86` followed by
+`GENCMD FORMAT`. The original `FDFORMAT.A86` remains for reference.
+See [command/README.md](command/README.md) for details and cautions.
+The new FORMAT source has static CI coverage; guest ASM86 compilation
+and on-emulator use must still be checked on disposable media.
+
 ## Whole-HDD CP/M-86 boot (I:, experimental)
 
 CBIOS now has a ninth DPH for the single physical FM-11 MDC hard
