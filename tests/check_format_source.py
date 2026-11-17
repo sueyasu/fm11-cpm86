@@ -10,6 +10,20 @@ refs = set(re.findall(r"^\s*(?:call|jmp|je|jne|jz|jnz|jc|jnc|ja|jae|jb|jbe|loop)
 missing = sorted(x for x in refs if x.lower() not in {s.lower() for s in symbols})
 assert not missing, missing
 assert len(re.findall(r"^end[ \t]*$", source, re.M|re.I)) == 1
+
+# ASM86 symbol identifiers are case-insensitive: HDD_SECTOR EQU and
+# hdd_sector DB cannot coexist, even if their case differs.
+definitions = re.findall(
+    r"^([A-Za-z_][A-Za-z_0-9]*)\\s*(?::|\\s+(?:equ|db|dw|dd|rs)\\b)",
+    source, re.M | re.I,
+)
+normalized = [symbol.upper() for symbol in definitions]
+assert len(normalized) == len(set(normalized)), (
+    "ASM86 duplicate symbol definitions",
+    sorted(symbol for symbol in set(normalized) if normalized.count(symbol) > 1),
+)
+assert "HDD_SECTOR     equ" not in source
+
 assert not re.search(r"\[(?:si|di|bx|bp)\s*\+\s*\d+\]", instructions,re.I)
 assert not re.search(r"\b(?:es|cs|ss|ds):\s*\[", instructions,re.I)
 assert "mov     cl,Byte Ptr .080h" in source
