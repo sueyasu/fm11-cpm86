@@ -352,10 +352,8 @@ selftest_entry:
     call WRITE
     or ax,ax
     ST_CHECK_Z
-    ; Write-through commits one physical WRITE, without rereading the
-    ; same sector. Preserve its other half from the cached 256 bytes.
+    ; Write-back changes the cache without physical WRITE yet.
     mov ax,[st_cache_write_before]
-    inc ax
     cmp ax,[cache_phys_writes]
     ST_CHECK_EQ
     mov ax,[cache_phys_reads]
@@ -387,9 +385,28 @@ selftest_entry:
     inc bx
     loop .compare
 
+    ; Commit the modified record. One dirty sector means one WRITE.
+    call cache_flush_all
+    jnc .cache_flush_ok
+    jmp st_restore_failed
+.cache_restore_flush_ok
+    mov ax,[st_cache_write_before]
+    inc ax
+    cmp ax,[cache_phys_writes]
+    ST_CHECK_EQ
     call st_restore
     or ax,ax
     ST_CHECK_Z
+    ; Restore must also be committed before claiming the scratch disk
+    ; is back to its original contents.
+    call cache_flush_all
+    jnc .cache_flush_ok
+    jmp st_restore_failed
+.cache_flush_ok
+    mov ax,[st_cache_write_before]
+    add ax,2
+    cmp ax,[cache_phys_writes]
+    ST_CHECK_EQ
     mov byte [st_dirty],0
     mov si,st_write_ok
     call serial_puts
@@ -580,7 +597,7 @@ st_read_ok db 'PASS READ directory ASM86.CMD',13,10,0
 st_key_prompt db 'Press one key for CONIN test: ',0
 st_key_ok db 13,10,'PASS CONIN',13,10,0
 st_write_ok db 'PASS WRITE/READ/RESTORE',13,10,0
-st_cache_ok db 'PASS CACHE PAIR/HIT/WRITE-THROUGH/RELOGIN',13,10,0
+st_cache_ok db 'PASS CACHE PAIR/HIT/TRACK-WRITEBACK/RELOGIN',13,10,0
 st_write_bad db 'FAIL WRITE verify; restoring...',13,10,0
 st_restore_bad_msg db 'FAIL RESTORE: disposable disk changed',13,10,0
 st_pass db 'PASS CBIOS SELFTEST',13,10,0
