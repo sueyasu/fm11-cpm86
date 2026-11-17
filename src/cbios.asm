@@ -84,6 +84,7 @@ INIT:
     ; In particular the old 00h/40h reset sequence is unsafe here.
     ; Leave MODE, CMD and DTR untouched throughout the CBIOS handoff.
     mov word [cur_track],0
+    mov byte [cache_valid],0
     mov word [cur_sector],0
     mov word [dma_off],0x0080
     mov [dma_seg],cs
@@ -137,6 +138,7 @@ INIT:
 %endif
 
 WBOOT:
+    mov byte [cache_valid],0 ; no dirty data: safe to discard
     jmp 0x0006           ; provisional: disk reload not implemented
 
 CONST:
@@ -344,6 +346,10 @@ SELDSK:
     shl bx,1
     mov bx,[dph_table+bx]
     mov [cur_disk],cl
+    ; First login can follow a media change: never reuse an old sector.
+    test dl,1
+    jnz .absent
+    call cache_invalidate
 .absent:
     ret
 
@@ -363,9 +369,10 @@ SETDMAB:
     mov [dma_seg],cx
     ret
 
-; CP/M-86 128-byte record I/O: 2D (32 records/side-track) or
-; 2HD (52 records/side-track).  All eight drives are independent.
-; Each write reads the whole physical sector before changing one half.
+; CP/M-86 128-byte record I/O, shared by all 2D/2HD/HDD drives.
+; The 256-byte bounce buffer is a write-through single-sector cache:
+; two logical halves of one physical sector share one physical READ.
+; Every WRITE still commits the whole physical sector immediately.
 READ:
 %ifdef CBIOS_SELFTEST
     mov byte [cs:st_rw_entry],1 ; proves the direct CALL reached READ
@@ -446,33 +453,13 @@ rw_2d:
 %ifdef CBIOS_SELFTEST
     mov byte [st_rw_path],3      ; input accepted; disk access follows
 %endif
-    cmp byte [cur_disk],8
-    jne .floppy_read
-    mov bx,[cur_sector]
-    and bx,1
-    call hdd_read
-    jc .error
-    jmp .copy_record
-.floppy_read:
-    ; Translate side-track and logical record to physical CHS.
-    mov bx,[cur_track]
-    mov dx,bx
-    and dl,1
-    mov dh,dl               ; physical head = track & 1
-    shr bx,1
-    mov ch,bl               ; cylinder = track / 2
-    mov bx,[cur_sector]
-    mov cl,bl
-    shr cl,1
-    inc cl                  ; physical sector = record / 2 + 1
-    and bx,1
-    mov al,[cur_disk]
-    call fdc2d_read
+    call cache_ensure       ; physical READ only on cache miss
     jc .error
 .copy_record:
-    ; BX is preserved by the physical sector routine: 0/1 half selector.
-    ; 8086 only permits an immediate shift count of one.
-    ; Do not use CL here: it still holds the sector number for WRITE.
+    ; Each physical sector holds two 128-byte CP/M records.
+    ; Recompute the half selector independently of the transport.
+    mov bx,[cur_sector]
+    and bx,1
     shl bx,1
     shl bx,1
     shl bx,1
@@ -495,10 +482,7 @@ rw_2d:
     jmp short .success
 
 .write_half:
-    ; WRITE: caller DMA -> BIOS buffer, retaining the opposite half.
-    ; Preserve CHS across the 128-byte memory copy.
-    push cx
-    push dx
+    ; Update the matching half, retain the other 128 bytes in cache.
     mov si,[dma_off]
     mov di,fdc2d_buffer
     add di,bx
@@ -506,19 +490,14 @@ rw_2d:
     mov ds,ax
     mov cx,64
     rep movsw
-    pop dx
-    pop cx
     push cs
     pop ds
-    mov al,[cur_disk]
-    cmp al,8
-    jne .floppy_write
-    call hdd_write
-    jc .error
-    jmp .success
-.floppy_write:
-    call fdc2d_write
-    jc .error
+    call sector_physical_write
+    jnc .success
+    ; A failed or partial physical WRITE invalidates cache contents:
+    ; force the next operation to re-read the real medium.
+    call cache_invalidate
+    jmp .error
 .success:
     xor ax,ax               ; CP/M-86 success: clear full AX, not only AL.
     jmp short .done
@@ -835,6 +814,7 @@ fdc2d_transfer:
     ret
 
 %include "src/cbios_hdd.inc"
+%include "src/cbios_sector_cache.inc"
 
 ; DMA bounce buffer, never exposed as a logical CP/M record.
 fdc_channel db 0
