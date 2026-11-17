@@ -185,6 +185,7 @@ test: check diag cbios-diag $(BUILD)/iplrom.bin $(BUILD)/test_2hd.d88 $(BUILD)/t
 	$(PYTHON) tests/check_fdformat_boot_patch.py $(BUILD)/cbios.bin $(BUILD)/cbios_2hd.bin $(BUILD)/cbios_hdd.bin
 	$(PYTHON) tests/check_image_files.py
 	$(PYTHON) tests/check_local_console.py
+	$(PYTHON) tests/check_iobyte.py
 	$(PYTHON) tests/check_ram_mrt.py $(BUILD)/cbios.bin
 	$(PYTHON) tests/check_cbios_segments.py
 	$(PYTHON) tests/check_diag.py $(BUILD)/fdc2d_diag.bin
