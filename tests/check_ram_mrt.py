@@ -22,7 +22,8 @@ assert "mov byte [ram_probe_anchor],0x5a" in section
 assert "mov byte [es:ram_probe_anchor],0xa5" in section
 assert "mov dl,[es:ram_probe_anchor]" in section
 assert "mov [es:ram_probe_anchor],dl" in section
-assert "mov [ram_probe_anchor],si" in section
+assert "mov al,[ram_probe_anchor]" in section
+assert "mov [ram_probe_anchor],al" in section
 assert "mov word [mrt_tpa_len],0xf700" in section
 assert "sub bx,0x0c00" in section
 assert "mov [mrt_tpa_len],bx" in section
