@@ -304,6 +304,31 @@ selftest_entry:
     call READ
     or ax,ax
     ST_CHECK_Z
+    ; The preceding READ loaded the physical sector containing records
+    ; 30 and 31. Reading its other half MUST be a cache hit.
+    mov ax,[cache_phys_reads]
+    mov [st_cache_read_before],ax
+    mov cx,30
+    call SETSEC
+    mov cx,ST_CHECK
+    call SETDMA
+    call READ
+    or ax,ax
+    ST_CHECK_Z
+    mov ax,[cache_phys_reads]
+    cmp ax,[st_cache_read_before]
+    ST_CHECK_EQ
+    ; Returning to the other half must also be a cache hit.
+    mov cx,31
+    call SETSEC
+    mov cx,ST_SAVE
+    call SETDMA
+    call READ
+    or ax,ax
+    ST_CHECK_Z
+    mov ax,[cache_phys_reads]
+    cmp ax,[st_cache_read_before]
+    ST_CHECK_EQ
     push ds
     mov ax,ST_SEG
     mov ds,ax
@@ -321,10 +346,21 @@ selftest_entry:
 
     mov cx,ST_WRITE
     call SETDMA
+    mov ax,[cache_phys_writes]
+    mov [st_cache_write_before],ax
     mov byte [st_dirty],1  ; failure may occur after a partial disk write
     call WRITE
     or ax,ax
     ST_CHECK_Z
+    ; Write-through commits one physical WRITE, without rereading the
+    ; same sector. Preserve its other half from the cached 256 bytes.
+    mov ax,[st_cache_write_before]
+    inc ax
+    cmp ax,[cache_phys_writes]
+    ST_CHECK_EQ
+    mov ax,[cache_phys_reads]
+    cmp ax,[st_cache_read_before]
+    ST_CHECK_EQ
 
     mov cx,ST_CHECK
     call SETDMA
@@ -333,6 +369,10 @@ selftest_entry:
     jz .readback_ok
     jmp st_restore_failed
 .readback_ok:
+    ; Read-after-write must see updated bytes in RAM without physical I/O.
+    mov ax,[cache_phys_reads]
+    cmp ax,[st_cache_read_before]
+    ST_CHECK_EQ
     mov ax,ST_SEG
     mov es,ax
     xor bx,bx
@@ -476,6 +516,8 @@ st_dph_expected_msg db ' EXPECTED=',0
 st_saved_iobyte db 0
 st_key db 0
 st_dirty db 0
+st_cache_read_before dw 0
+st_cache_write_before dw 0
 st_rw_entry db 0
 st_rw_ds dw 0xffff
 st_read_cs dw 0xffff
