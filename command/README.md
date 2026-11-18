@@ -1,3 +1,22 @@
+## Portable SYNC command (PC-9801 and FM-11)
+
+`SYNC.A86` is identical in both CP/M-86 repositories. It issues
+a FAR CALL to the private `CACHE_SYNC` ABI at `0400:3DD8`,
+reports success/failure from CF, and returns through BDOS function 0.
+
+```text
+A>ASM86 SYNC.A86
+A>GENCMD SYNC
+A>SYNC
+```
+
+`SYNC` commits all dirty cache sectors without invalidating the
+cached tracks. It is **not** a replacement for `CACHE_RESET` when
+changing media or accessing the controller directly; FORMAT already
+calls `CACHE_RESET`. Use this CMD only with the updated FM-11 or
+PC-9801 CBIOS exposing the shared FAR API. Normal termination through
+BDOS function 0 may also call WBOOT, whose cache sync is idempotent.
+
 ## ANSI/VT100 local console diagnostic (ANSITEST)
 
 `ANSITEST.A86` is a non-destructive, interactive CP/M-86 console
