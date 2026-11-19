@@ -425,6 +425,12 @@ Both windows are carved from the top of the detected RAM and removed
 from the GETSEGT memory region table (16 KiB total). 128 KiB RAM
 therefore reports an 80 KiB TPA, instead of the old 96 KiB.
 
+Physical sector READ/WRITE attempts are bounded to ten for FDD and three
+for HDD (including the initial attempt). Each retry reprograms DMA and
+reissues the same sector command. If the controller is still transferring
+or not command-ready, the BIOS returns an error rather than issuing a
+new command. No recalibration or controller reset is attempted.
+
 **Private cache ABI (compatible with PC-9801 CP/M-86):** Utilities
 can call the fixed 4-byte FAR stubs at `0400:3DD8` (`CACHE_SYNC`)
 and `0400:3DDC` (`CACHE_RESET`) without modifying the standard BIOS

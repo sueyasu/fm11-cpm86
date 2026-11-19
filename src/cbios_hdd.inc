@@ -176,7 +176,24 @@ hdd_transfer:
 .dma_bank_ok:
     mov si,ax
     mov di,dx
+    mov byte [hdd_attempts],3
+.retry:
+    call .attempt
+    jc .retry_failed
+    jmp .return
+.retry_failed:
+    dec byte [hdd_attempts]
+    jz .give_up
+    ; A completed result is drained by hdd_wait. Never start a new
+    ; command if the MDC has not returned to command-ready state.
+    mov dx,0xfdc0
+    in al,dx
+    test al,0x80
+    jnz .retry
+.give_up:
+    jmp .bad
 
+.attempt:
     mov dx,0x1a
     mov al,6                ; mask DMA2
     out dx,al
@@ -255,7 +272,7 @@ hdd_transfer:
     mov al,6
     out dx,al               ; mask DMA2 again
     popf
-    jmp .return
+    ret
 .bad:
     stc
 .return:
@@ -272,6 +289,7 @@ hdd_cylinders dw 0
 hdd_total_tracks dw 0
 hdd_heads db 0
 hdd_rw db 0
+hdd_attempts db 0
 hdd_lba_lo dw 0
 hdd_lba_hi dw 0
 hdd_result: times 10 db 0

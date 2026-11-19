@@ -696,7 +696,30 @@ fdc2d_transfer:
 .invalid:
     jmp .bad               ; 8086 conditional branches have 8-bit reach
 .validated:
+    mov byte [fdc_attempts],10
+.retry:
+    ; The polling loop consumes CX; keep the original cylinder/sector.
+    push cx
+    call .attempt
+    pop cx
+    jc .retry_failed
+    jmp .restore
+.retry_failed:
+    dec byte [fdc_attempts]
+    jz .give_up
+    ; Do not issue another command while the controller is transferring.
+    mov dx,0xfd18
+    cmp byte [fdc_channel],0
+    je .retry_status
+    mov dl,0x30
+.retry_status:
+    in al,dx
+    test al,0x02
+    jz .retry
+.give_up:
+    jmp .bad
 
+.attempt:
     ; Convert the real-mode CS:offset into an 8237 bank:offset address.
     ; 256-byte transfer must not cross a 64 KiB DMA page boundary.
     mov ax,cs
@@ -705,7 +728,10 @@ fdc2d_transfer:
     add ax,fdc2d_buffer
     adc dx,0
     cmp ax,0xff00
-    ja .invalid
+    jbe .dma_ok
+    stc
+    ret
+.dma_ok:
     mov si,ax                ; 16-bit DMA address
     mov di,dx                ; DMA bank (bits 16..19)
 
@@ -826,7 +852,7 @@ fdc2d_transfer:
     add al,[fdc_channel]
     out dx,al
     popf
-    jmp .restore
+    ret
 .bad:
     stc
 .restore:
@@ -844,6 +870,7 @@ fdc2d_transfer:
 
 ; DMA bounce buffer, never exposed as a logical CP/M record.
 fdc_channel db 0
+fdc_attempts db 0
 fdc2d_buffer: times 256 db 0
 
 ; Eight physical drives: A:..D: 2D/CH0, E:..H: 2HD/CH1.
