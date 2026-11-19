@@ -1,19 +1,11 @@
-# External CP/M-86 disk files
+# 起動イメージに収録するファイル
 
-Place any CP/M-compatible 8.3-named regular files here:
-`FDFORMAT.A86`, `FDIPL2D.INC`, `FDIPL2HD.INC`,
-`PIP.CMD`, `NOTES.TXT`, and so on.
+CP/M-86用のCMDファイル、A86ソース、INCファイル、TXTファイルなどをこのディレクトリに置いてください。
 
-All files except this host-only `README.md` are automatically added
-to both the 2D and 2HD images by `make boot-d88` or `make boot-2hd`.
-They are stored byte-for-byte as CP/M files; text is not converted,
-so an ASM86 source should already have CRLF and Ctrl-Z if required.
+このREADME.mdを除くファイルは、make boot、make boot-d88、make boot-2hd、make boot-hddで生成するイメージに収録されます。ファイル名はCP/Mの8.3形式とし、大文字へ変換されます。同名ファイル（大文字・小文字の違いのみの場合を含む）、不正な名前、ディスク容量やディレクトリ容量の不足はエラーになります。
 
-Only standard CP/M 8.3 names and characters are supported. File names
-are converted to uppercase, and duplicate names (case-insensitive),
-disk-capacity and directory-capacity errors abort image generation.
+ファイルの内容は変換されません。ASM86用ソースなどは必要に応じてCRLF改行やCtrl-Z終端に整えてください。
 
-Use `make -B boot-d88` or `make -B boot-2hd` after **removing**
-a file: Make cannot notice a disappeared wildcard prerequisite.
-The supplied source code and tool binaries are external inputs and
-are not tracked in this directory.
+ファイルの削除後はmake -B boot-d88などで再生成してください。既存イメージに保存したデータは再生成によって失われます。
+
+詳しくは [BUILD.md](../../BUILD.md) を参照してください。

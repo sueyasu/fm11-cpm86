@@ -1,7 +1,54 @@
-## ANSI/VT100 local console diagnostic (ANSITEST)
+# 付属コマンド
 
-`ANSITEST.A86` is a non-destructive, interactive CP/M-86 console
-test. Assemble it **inside CP/M-86**, just as with FORMAT:
+## FORMAT.CMD
+
+FDおよびHDDをCP/M用に初期化するコマンドです。
+
+| 指定例 | 動作 |
+|---|---|
+| FORMAT B: | 2D FDの物理・論理フォーマット |
+| FORMAT F: /S | 2HD FDのフォーマットと起動用システムの書き込み |
+| FORMAT B: /L | FDの低レベルフォーマットのみ |
+| FORMAT I: | HDD全体の論理フォーマット |
+| FORMAT HDD /S | HDD全体の論理フォーマットと起動用システムの書き込み |
+
+A:～D:は2D、E:～H:は2HD、I:またはHDDはMDC HDDを指定します。HDDの/Lは使用できません。
+
+/Sを利用する場合には、ディスクIPL付きの起動可能なシステムが入っているA:、E:またはI:をカレントドライブにしてください。FORMATは書き込み先を初期化する前に、カレントドライブからシステムを読み出します。独自IPL ROM専用の2D RAWイメージ（make bootで生成）は配置が異なるため、/Sのコピー元にはディスクIPL付きのシステムディスクを使用してください。
+
+**対象ディスク上の既存ファイルは失われます。** 特にHDDでは区画単位ではなくディスク全体が対象になります。必要なデータは事前にバックアップしてください。
+
+HDDの論理フォーマットは予約シリンダとディレクトリを初期化するもので、全データ領域の消去や物理フォーマットを行うものではありません。エミュレータでは、あらかじめ対応する容量のHDD RAWイメージを接続しておく必要があります。
+
+### FORMAT.CMDの作成
+
+Linux上でリポジトリのルートから次のコマンドを実行し、IPLのインクルードファイルを作成します。
+
+```sh
+make format-inc
+```
+
+次の4ファイルをCP/M-86上の同じドライブに転送します。
+
+- command/FORMAT.A86
+- command/FDIPL2D.INC
+- command/FDIPL2HD.INC
+- command/HDIPL.INC
+
+CP/M-86上でASM86とGENCMDを使って作成します。
+
+```text
+A>ASM86 FORMAT.A86
+A>GENCMD FORMAT
+```
+
+生成したFORMAT.CMDを使用してください。ASM86.CMDとGENCMD.CMDは別途用意する必要があります。
+
+## ANSITEST.CMD
+
+ローカル画面のANSI/VT100制御を確認するためのコマンドです。ディスクの内容を変更しません。
+
+command/ANSITEST.A86をCP/M-86に転送し、次のように作成・実行します。
 
 ```text
 A>ASM86 ANSITEST.A86
@@ -10,74 +57,4 @@ A>STAT CON:=CRT:
 A>ANSITEST
 ```
 
-Select `CON:=UC1:` instead to verify that the local display receives
-translated ANSI while the serial PTY receives the original sequences.
-The test consists of nine key-stepped screens for positioning,
-CSI K/J/X erasing, SGR colors and rendition, save/restore, VT100
-index/reset and native FM-11 controls. It outputs via BDOS only and
-does not access disk sectors or hardware registers.
-
-The program requires an ANSI-capable local console. `ASM86` and
-`GENCMD` must already be available on the guest disk.
-
-## Unified FORMAT (floppy 2D/2HD and whole MDC HDD)
-
-`FORMAT.A86` is the sole maintained floppy/HDD formatter source. Both `HDD` and `I:` select the one physical MDC HDD.
-
-| Command | Effect |
-|---|---|
-| `FORMAT B:` | Physical WRITE TRACK of 2D FDD B: |
-| `FORMAT F: /S` | Physically format 2HD and install boot IPL/resident |
-| `FORMAT B: /L` | Physical track format only (FDD) |
-| `FORMAT HDD` | Whole-HDD logical format (IPL area + directory) |
-| `FORMAT I:` | Same as `FORMAT HDD` |
-| `FORMAT HDD /S` | Whole-HDD logical format, IPL and CP/M-86 resident |
-| `FORMAT I: /S` | Same bootable HDD format |
-
-MDC HDD offers sector READ/WRITE, **not a physical WRITE TRACK
-operation**. `FORMAT HDD /L` and `FORMAT I: /L` are explicitly
-rejected **before any modification to the HDD**.
-
-The HDD uses the same binary-LBA mode and DMA channel 2 as the CBIOS
-`I:` implementation. All nine supported model geometries are
-detected via MDC SENSE. The normal HDD format writes E5h to all sectors
-of physical cylinder 0 and the first 64 sectors of cylinder 1 (the
-16 KiB CP/M directory allocation block). File data blocks beyond the
-directory are not physically overwritten, but CP/M no longer references
-them after the directory is initialized.
-
-For `/S`, FORMAT reads the 0x3E00-byte source resident from the
-currently selected A:, E: or I: system drive **before** overwriting
-the destination. It checks and patches the CBIOS INIT boot-drive
-immediate to A: (0), E: (4), or I: (8). For the HDD target, it installs
-the exact 512-byte IPL in physical LBA0-1 and the resident in LBA2-63,
-then reads back and compares all 64 sectors.
-
-**Do not execute FORMAT against an important HDD image.** It does
-not repartition or resize a host image: the emulator must already have
-a supported raw MDC image mounted. Use disposable images while testing.
-
-### Build FORMAT.CMD under CP/M-86
-
-On Linux, prepare all three ASM86 INCLUDE files:
-
-```sh
-make format-inc
-make test
-```
-
-Copy these files into the same directory on a CP/M-86 disk:
-`command/FORMAT.A86`, `command/FDIPL2D.INC`,
-`command/FDIPL2HD.INC`, and `command/HDIPL.INC`.
-
-```text
-I>ASM86 FORMAT.A86
-I>GENCMD FORMAT
-I>FORMAT HDD /S
-```
-
-The `I>` prompt is illustrative; the command may be assembled on
-any CP/M-86 boot drive. `FORMAT.CMD` has been assembled and exercised successfully under CP/M-86
-in the FM-11 emulator. Linux CI checks the source structure and IPL
-images; continue using disposable media for destructive tests.
-
+9画面をキー入力で順に表示し、カーソル移動、消去、文字色・装飾などを確認できます。UC1:に設定すればシリアル端末への出力もあわせて確認できます。

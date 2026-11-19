@@ -44,8 +44,7 @@ records. The raw and D88 files are therefore not byte-identical.
 
 Run `make test` without a proprietary CP/M core to verify geometry,
 D88 record headers, CBIOS layout, resident placement, and allocations
-using a synthetic **nonbootable** core. The first actual E: boot and
-guest READ/WRITE tests still need emulator confirmation.
+using a synthetic **nonbootable** core. E: boot has been confirmed in the emulator; real hardware validation remains necessary.
 
 Configure the emulator with a 2HD D88 image in physical 2HD FDD0
 and `[DIPSW] 2HD_FDD=true`. The booted OS should initially select E:.

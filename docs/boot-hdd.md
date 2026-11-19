@@ -74,20 +74,16 @@ fm11-sdl --config /path/to/fm11emu.conf \
   --8088-rom /path/to/fm11-cpm86/build/hdd_bootrom.bin
 ```
 
-After connecting a terminal to the serial PTY, send a character
-to release the ROM's serial attach gate. It then reads the HDD IPL.
+The default local-console ROM starts immediately. Only the serial-console build (CONSOLE_LOCAL=0) waits for a character on the serial PTY before loading the HDD IPL.
 The IPL boots CP/M-86 with initial drive `I:` (drive number 8).
 Do not mount this HDD image concurrently elsewhere.
 
 `make hddipl-inc` creates `command/HDIPL.INC` from the identical IPL
-binary for the later unified FORMAT /S command. Existing FDFORMAT
-only handles floppy drives; it must not be used to overwrite the HDD.
+binary used by the unified FORMAT /S command. See [command instructions](../command/README.md).
 
 **Validation status:** NASM and image-structure checks run in GitHub
 Actions, including the I: INIT boot-drive value, boot ROM size, IPL,
-and resident layout. Actual end-to-end boot through the FM-11 SDL
-emulator and subsequent I: file I/O have not yet been verified.
-Use only disposable test HDD images for the first validation.
+and resident layout. Real hardware validation and testing every supported geometry remain necessary. Use disposable images for destructive tests.
 
 ## Supported models
 

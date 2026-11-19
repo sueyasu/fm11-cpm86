@@ -17,11 +17,10 @@ BIOS entry without relying on PC-9801 INT 1Bh.
 The existing `pc98_cpm86` resident image has a 0x2500-byte externally
 provided CCP/BDOS core followed by BIOS at offset 2500h, using a 0x1900
 byte BIOS area. This project initially reserves the same offsets and
-retains the CBIOS 21-entry jump table, pending actual FM-11 boot verification.
+retains the CBIOS 21-entry jump table, 
 The experimental 2D IPL ROM now loads this resident image at segment
 0400h and enters CBIOS INIT at 0400:2500. The initial BIOS stack tops
-out at 0400:4000 (physical 08000h), below the TPA base at segment 0800h. A usable CCP/BDOS boot is
-not yet verified.
+out at 0400:4000 (physical 08000h), below the TPA base at segment 0800h. The CCP/BDOS boot has been verified in the emulator.
 
 ## Cold-boot RAM detection and CP/M-86 Memory Region Table
 
@@ -70,8 +69,7 @@ extending to the 1 MiB address-space boundary.  The 113-capacity test (mirrored,
 `python3 tests/check_ram_mrt.py build/cbios.bin` (also run by
 `make test`).
 
-**Hardware validation:** These probes rely on RAM mirroring, which
-is implemented by the current FM-11 emulator.  Memory decode behavior
+**Hardware validation:** These probes detect both RAM mirroring and failed write/readback.  Memory decode behavior
 of every original FM-11 RAM expansion configuration has not yet been
 verified on real hardware.  The source-level test models the emulator
 decoder, not a live CPU or a booted CP/M-86 system.  Validate the
@@ -107,11 +105,9 @@ at NASM assembly time selects the original serial path. The 2D and
 HDD reset ROMs also skip the optional serial-PTY input gate in the
 local build. `LISTOUT` and `PUNCH` continue using USART0.
 
-This is **native-character mode** rather than the more comprehensive
-NitrOS-9 ANSI/VT100 parser. The emulator's 8088 `Main8088Bus`
+The local output now also translates the supported ANSI/VT100 sequences through src/cbios_ansi.inc. The emulator's 8088 `Main8088Bus`
 routes `FC80h-FCFFh` to `MainBoard::displaySubsystem` and
-`FD05h` to the same subsystem control used by 6809. Live SDL
-screen/keyboard verification remains outstanding.
+`FD05h` to the same subsystem control used by 6809. Real hardware validation remains necessary.
 
 ## FM-11 devices
 
@@ -139,7 +135,7 @@ These parameters match the experimental raw 2D IPL image builder:
 62 consecutive 256-byte sectors are placed at the beginning of the disk,
 and the 64-entry empty CP/M directory starts after four reserved side-tracks.
 The 128-byte READ/WRITE and read-modify-write paths have passed dedicated
-emulator diagnostics. File-level filesystem behavior is not yet verified.
+emulator diagnostics. File-level operation has also been exercised in the emulator.
 
 The initial 2D physical-sector transport is now present in `src/cbios.asm`
 as `fdc2d_read` and `fdc2d_write`.  Both use the Mini FDC registers
@@ -178,22 +174,22 @@ data on both windows is flushed; then the modified directory record is
 written and the resulting dirty sector is flushed before reporting
 success. This ordering avoids persisting a new directory entry before
 its data blocks. Failed physical writes retain the dirty bitmap, prevent
-unsafe eviction, and return an I/O error. The provisional WBOOT path
-halts on a failed flush rather than discarding data. The special
+unsafe eviction, and return an I/O error. WBOOT reports a failed flush on the active console and halts rather than discarding dirty data. The special
 WRITE type `CL=2` (first record of unallocated block) still reads the
 256-byte physical sector before modifying it, so its other half
 remains intact.
 
-**Important:** CP/M-86 v1.1 does not have a separate general-purpose
-BIOS flush entry; directory WRITE, eviction and WBOOT provide the
-flush points. An application that writes data without committing the
-directory, exits without WBOOT, and then removes media can still lose
-dirty data. Utilities that bypass CBIOS disk I/O (e.g. direct FORMAT)
-must first flush/invalidate the cache; the standard BIOS cannot detect
-arbitrary out-of-band FDC writes or unsignaled media changes. Therefore
-hot-swap and direct-controller formatting are not yet cache-coherent.
-No cache is installed in the emulator: the guest track cache is usable
-on actual FM-11 hardware.
+**Private cache API:** Fixed FAR entries at 0400:3DD8 (CACHE_SYNC)
+and 0400:3DDC (CACHE_RESET) return CF=1 on failure. CACHE_RESET
+invalidates windows only after successful synchronization. FORMAT calls
+CACHE_RESET before direct disk I/O. Media changes still require the
+operator to follow the procedure in the main README.
+
+Physical FDD READ/WRITE attempts are limited to ten and MDC attempts
+to three, including the initial command. DMA is reprogrammed for each
+attempt. A controller that remains busy/not command-ready terminates
+the operation without another command. No controller reset or FDD
+recalibration is performed.
 
 `make test` checks the source invariants and fixed CBIOS image layout;
 the optional CBIOS self-test additionally checks two-window retention,
@@ -218,9 +214,7 @@ controller access, and only two tracks are resident at once. The DMA
 bounce buffer is checked against 8237 64 KiB page boundaries, and the
 caller DMA offset is checked for 128-byte wrapping.
 
-The 2D IPL first-stage ROM and image generator are present. Next verify
-actual cold boot through INIT, the CCP/BDOS core, and filesystem access,
-then verify all additional 2D/2HD units and the 2HD boot image in the emulator.
+2D, 2HD and whole-HDD boot images are supported. Testing every drive and original hardware configuration remains necessary.
 
 ## Known emulator integration questions
 

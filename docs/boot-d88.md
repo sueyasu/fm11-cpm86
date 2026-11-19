@@ -40,7 +40,7 @@ The disk IPL loads 62 sectors from C0/H0/S3 onward into physical RAM
 CBIOS is still assembled at ORG 2500h, and its DPB OFF=4 and all file
 allocation values are unchanged.
 
-## Original emulator 8088 ROM compatibility (v128)
+## Original emulator 8088 ROM compatibility (v128; development history)
 
 Inspection of the uploaded original emulator source (`Fm11/BootRom86.h`,
 v128) shows its floppy boot code performs a far jump to **`07C0:0000`**
@@ -86,7 +86,7 @@ An early `I` may be lost if the PTY is attached after the IPL begins.
 The output is designed to be compact enough for the 512-byte boot sector,
 rather than provide a verbose interactive diagnostic.
 
-## 8088 original emulator: serial TX wait at 07CA9h
+## 8088 original emulator: serial TX wait at 07CA9h (development history)
 
 The original emulator v128 implements the shared 8251 as a state machine
 (`Fm11/MainCpu.cpp`, `Fm11RS232C`). A cold or warm boot need not leave
