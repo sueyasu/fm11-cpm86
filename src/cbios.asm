@@ -147,6 +147,19 @@ WBOOT:
 .sync_failed:
     ; WBOOT has no status return; never claim a successful warm boot
     ; while dirty sectors could not be committed.
+    push cs
+    pop ds
+    cld
+    mov byte [ansi_state],0   ; discard any incomplete escape sequence
+    mov si,wboot_sync_error_msg
+.report:
+    lodsb
+    test al,al
+    jz .stop
+    mov cl,al
+    call CONOUT              ; use the current IOBYTE console routing
+    jmp .report
+.stop:
     cli
 .halt:
     hlt
@@ -633,6 +646,7 @@ SETIOBF:
     ret
 
 hello db 'FM-11 CP/M-86 BIOS: serial initialized',13,10,0
+wboot_sync_error_msg db 13,10,'WBOOT: disk cache write-back failed. System halted.',13,10,0
 cur_disk db 0
 iobyte db 0                ; initialized in INIT; full byte kept for STAT
 uc1_next db 0              ; 0=local, 1=serial; tie-break preference

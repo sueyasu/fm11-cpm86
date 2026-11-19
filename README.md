@@ -445,7 +445,11 @@ confirms the destructive target and **before any direct FDD/HDD I/O**,
 including sourcing an IPL or resident image for `/S`. Failure aborts
 FORMAT without accessing the target. The existing BDOS disk reset
 (function 13) remains after formatting. WBOOT also calls `CACHE_SYNC`
-through the same internal entry.
+through the same internal entry. If write-back fails during WBOOT, the BIOS
+prints `WBOOT: disk cache write-back failed. System halted.` on the current
+IOBYTE console and halts without discarding dirty cache data. Restarting
+loses any uncommitted data; check the disk contents after restarting because
+some sectors may already have been written.
 
 **Important:** A normal BIOS WRITE returns before the guest cache is
 necessarily durable. Avoid hot-swapping media while dirty data may

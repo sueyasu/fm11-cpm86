@@ -21,7 +21,15 @@ assert "CACHE_RESET_OFS equ 0x3DDC" in bios_source
 assert "times (CACHE_SYNC_OFS - 0x2500) - ($ - bios_start) db 0" in bios_source
 assert "call CACHE_SYNC\n    retf\n    call CACHE_RESET\n    retf" in bios_source
 assert "WBOOT:\n" in bios_source
-assert "    call CACHE_SYNC" in bios_source.split("WBOOT:", 1)[1].split("CONST:", 1)[0]
+wboot = bios_source.split("WBOOT:", 1)[1].split("CONST:", 1)[0]
+assert re.search(r"call CACHE_SYNC\s+jc \.sync_failed\s+jmp 0x0006", wboot)
+failure = wboot.split(".sync_failed:", 1)[1]
+assert re.search(r"push cs\s+pop ds\s+cld", failure)
+assert "mov byte [ansi_state],0" in failure
+assert "mov si,wboot_sync_error_msg" in failure
+assert re.search(r"lodsb\s+test al,al\s+jz \.stop\s+mov cl,al\s+call CONOUT", failure)
+assert re.search(r"\.stop:\s+cli\s+\.halt:\s+hlt\s+jmp \.halt", failure)
+assert "wboot_sync_error_msg db 13,10,'WBOOT: disk cache write-back failed. System halted.',13,10,0" in bios_source
 
 sync_body = bios_source.split("\nCACHE_SYNC:\n", 1)[1].split("\nCACHE_RESET:\n", 1)[0]
 reset_body = bios_source.split("\nCACHE_RESET:\n", 1)[1].split("\n; Keep the same", 1)[0]
