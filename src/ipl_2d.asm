@@ -146,6 +146,10 @@ read256:
     mov dx,DMA_MASK
     mov al,4
     out dx,al
+    call position_head
+    jnc .positioned
+    ret                       ; DMA remains masked on positioning error
+.positioned:
     mov dx,DMA_FF
     xor al,al
     out dx,al
@@ -166,19 +170,14 @@ read256:
     out dx,al
     mov dx,DMA_TC
     in al,dx
-    mov dx,FDC_TRACK
-    mov ax,bp
-    out dx,al                 ; cylinder
-    inc dx
+    mov dx,FDC_TRACK+1        ; sector register
     mov ax,si
     out dx,al                 ; sector
     mov dx,FDC_SIDE
     mov ax,di
     out dx,al                 ; head
-    inc dx
-    xor al,al
-    out dx,al                 ; drive 0
     mov dx,DMA_MASK
+    xor al,al
     out dx,al                 ; unmask DMA CH0
     mov dx,FDC_CMD
     mov al,0x80
@@ -188,7 +187,7 @@ read256:
     in al,dx
     test al,0x10
     jnz .bad
-    test al,2
+    test al,3                 ; BUSY or DRQ
     jz .complete
     loop .poll
     jmp .bad
@@ -212,4 +211,61 @@ read256:
     ret
 
 ; The boot ROM loads two 256-byte sectors as one first-stage image.
-times 0x200-($-$$) db 0
+position_head:
+    ; Drive 0 is the boot unit. The relocated IPL owns its position byte.
+    mov dx,FDC_SIDE+1
+    xor al,al
+    out dx,al
+    mov dx,FDC_CMD
+    call wait_type1_idle
+    jc .done
+    cmp byte [cs:physical_cyl],0xff
+    jne .known
+    mov al,0x0b               ; RESTORE without verify
+    call type1
+    jc .done
+    mov byte [cs:physical_cyl],0
+.known:
+    mov ax,bp
+    cmp al,[cs:physical_cyl]
+    je .ok
+    mov dx,FDC_TRACK+2        ; DATA = destination cylinder
+    out dx,al
+    mov dx,FDC_CMD
+    mov al,0x1b               ; SEEK without verify
+    call type1
+    jc .done
+    mov ax,bp
+    mov [cs:physical_cyl],al
+.ok:
+    clc
+.done:
+    ret
+
+type1:
+    out dx,al
+    mov cx,16
+.delay:
+    loop .delay
+    call wait_type1_idle
+    jc .done
+    test al,0x90              ; not ready / seek error
+    jz .done
+    stc
+.done:
+    ret
+
+wait_type1_idle:
+    mov cx,0xffff
+.poll:
+    in al,dx
+    test al,1                 ; Type I bit 1 is INDEX, not DRQ
+    jz .done
+    loop .poll
+    stc
+.done:
+    ret
+
+physical_cyl db 0xff
+
+times 0x200-($-$) db 0

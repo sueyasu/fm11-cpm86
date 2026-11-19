@@ -955,6 +955,10 @@ FDF_SKIP_056:
         mov     al,4
         add     al,Byte Ptr io_channel
         out     dx,al
+        call    floppy_position
+        jnc     dt_positioned
+        jmp     dt_bad
+dt_positioned:
         mov     dx,01ch
         xor     al,al
         out     dx,al
@@ -1007,16 +1011,11 @@ dt_mode:
         mov     dx,018h
         in      al,dx
 
-        mov     dx,0fd19h
+        mov     dx,0fd1ah
         cmp     Byte Ptr io_channel,0
-        jne     FDF_SKIP_061
-        jmp     dt_track
-FDF_SKIP_061:
-        mov     dl,031h
-dt_track:
-        mov     al,Byte Ptr io_cyl
-        out     dx,al
-        inc     dx
+        je      dt_sector
+        mov     dl,032h
+dt_sector:
         mov     al,Byte Ptr io_sector
         out     dx,al
 
@@ -1029,10 +1028,6 @@ FDF_SKIP_062:
 dt_side:
         mov     al,Byte Ptr io_head
         out     dx,al
-        inc     dx
-        mov     al,Byte Ptr io_unit
-        out     dx,al
-
         mov     dx,01ah
         mov     al,Byte Ptr io_channel
         out     dx,al
@@ -1054,7 +1049,7 @@ dt_poll:
         jz     FDF_SKIP_065
         jmp     dt_fail
 FDF_SKIP_065:
-        test    al,002h
+        test    al,003h
         jnz     FDF_SKIP_066
         jmp     dt_check
 FDF_SKIP_066:
@@ -1086,6 +1081,7 @@ dt_ok:
         jmp     dt_finish
 dt_fail:
 dt_bad:
+        mov     Byte Ptr positioned_drive,0ffh
         stc
 dt_finish:
         pushf
@@ -1101,6 +1097,71 @@ dt_finish:
         pop     cx
         pop     bx
         pop     ax
+        ret
+
+; ---- Floppy Type I positioning (DMA channel already masked) -------
+; Keep only the last selected drive's physical cylinder. Switching
+; source/target or controller forces RESTORE before the next SEEK.
+; Clobbers AX/CX/DX only; SI/DI hold the prepared DMA address.
+floppy_position:
+        mov     dx,0fd1dh
+        cmp     Byte Ptr io_channel,0
+        je      fp_select
+        mov     dl,035h
+fp_select:
+        mov     al,Byte Ptr io_unit
+        out     dx,al
+        sub     dx,5
+        call    floppy_idle
+        jc      fp_done
+        mov     al,Byte Ptr io_drive
+        cmp     al,Byte Ptr positioned_drive
+        je      fp_known
+        mov     al,00bh
+        call    floppy_type1
+        jc      fp_done
+        mov     al,Byte Ptr io_drive
+        mov     Byte Ptr positioned_drive,al
+        mov     Byte Ptr positioned_cyl,0
+fp_known:
+        mov     al,Byte Ptr io_cyl
+        cmp     al,Byte Ptr positioned_cyl
+        je      fp_ok
+        add     dx,3
+        out     dx,al
+        sub     dx,3
+        mov     al,01bh
+        call    floppy_type1
+        jc      fp_done
+        mov     al,Byte Ptr io_cyl
+        mov     Byte Ptr positioned_cyl,al
+fp_ok:
+        clc
+fp_done:
+        ret
+
+floppy_type1:
+        out     dx,al
+        mov     cx,16
+fp_delay:
+        loop    fp_delay
+        call    floppy_idle
+        jc      fp_type1_done
+        test    al,090h
+        jz      fp_type1_done
+        stc
+fp_type1_done:
+        ret
+
+floppy_idle:
+        mov     cx,0ffffh
+fp_poll:
+        in      al,dx
+        test    al,1
+        jz      fp_idle_done
+        loop    fp_poll
+        stc
+fp_idle_done:
         ret
 
 ; ----- Single physical FM-11 MDC hard disk --------------------------
@@ -1649,6 +1710,8 @@ mode            db      MODE_DATA
 io_drive        db      0
 io_unit         db      0
 io_channel      db      0
+positioned_drive db     0ffh
+positioned_cyl   db     0
 cylinders       db      40
 sectors_per_side db     16
 io_cyl          db      0
