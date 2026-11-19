@@ -16,6 +16,17 @@ assert init.index("call init_mrt") < init.index("call cache_init")
 cache = Path("src/cbios_track_cache.inc").read_text()
 assert "sub ax,0x0400" in cache and "add ax,0x0200" in cache
 assert init.index("call init_mrt") < init.index("jmp 0x0000")
+assert init.index("call cache_init") < init.index("call print_startup") < init.index("jmp 0x0000")
+assert "mov word [cs:ram_kib],1024" in source
+assert "mov [cs:ram_kib],bx" in source
+assert "init_msg db 13,10,'CP/M-86 v1.1 for FM-11 series',13,10,0" in source
+assert "ram_msg db 13,10,'        RAM ',0" in source
+assert "tpa_msg db 'KiB / TPA ',0" in source
+assert "kib_crlf_msg db 'KiB',13,10,13,10,0" in source
+startup = source.split("print_startup:", 1)[1].split("console_puts:", 1)[0]
+assert "mov ax,[ram_kib]" in startup
+assert "mov ax,[mrt_tpa_len]" in startup
+assert "mov cl,6" in startup and "shr ax,cl" in startup
 section = source.split("\ninit_mrt:\n", 1)[1].split("\nGETIOBF:\n", 1)[0]
 for instruction in (
     "RAM_PROBE_OFF equ 0x0500",
@@ -120,6 +131,7 @@ for kib in range(128, 1025, 8):
         final_length = length - 0x0400
         first_window = (start + final_length) * 16
         second_window = first_window + 8192
+        assert final_length // 64 == kib - 48 - (4 if kib == 1024 else 0)
         assert final_length >= 0x1400  # 80 KiB TPA on 128 KiB FM-11
         assert first_window == min(kib*1024, ROM_START) - 16384
         assert second_window + 8192 == min(kib*1024, ROM_START)

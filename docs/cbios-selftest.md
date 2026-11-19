@@ -33,7 +33,9 @@ The usual IPL consumes an initial character to allow PTY attachment.
 After it loads the resident image, the expected heading is:
 
 ```text
-FM-11 CP/M-86 BIOS: serial initialized
+CP/M-86 v1.1 for FM-11 series
+
+        RAM ...KiB / TPA ...KiB
 
 CBIOS SELFTEST (NO CCP/BDOS)
 ```

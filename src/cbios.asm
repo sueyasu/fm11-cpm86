@@ -100,14 +100,8 @@ INIT:
     ; Keep 0400h:0000h-3FFFh resident and all probing side-effect-free.
     call init_mrt
     call cache_init             ; reserve two 8 KiB windows above TPA
-%if CONSOLE_LOCAL
-    ; Keep the BOOT_DRIVE immediate at its on-disk patchable BIOS offset
-    ; without requiring USART0 to be ready for a local-screen cold boot.
+    ; Preserve the existing on-disk BOOT_DRIVE patch offset in both builds.
     times 6 nop
-%else
-    mov si,hello
-    call serial_puts
-%endif
 
     ; Match the CP/M-86 v1.1 cold-start ABI from pc98_cpm86:
     ; BDOS CURDRV resides at offset 24B7h in the common system segment.
@@ -128,10 +122,12 @@ INIT:
     call local_putc
     mov al,0x0b            ; native home
     call local_putc
-    mov si,local_hello
-    call local_puts
 %endif
     sti
+    call print_startup
+    ; Restore the CCP cold-entry drive after console output.
+    xor cx,cx
+    mov cl,[cur_disk]
 %ifdef CBIOS_SELFTEST
     jmp selftest_entry   ; diagnostic build: never enter CCP/BDOS
 %else
@@ -622,11 +618,16 @@ init_mrt:
 .full:
     ; No alias through 1016 KiB: full 1 MiB, except the top 4 KiB ROM.
     mov word [cs:mrt_tpa_len],0xf700
+    mov word [cs:ram_kib],1024
     jmp short .done
 .found:
     ; BX holds the boundary in paragraphs.  TPA starts at 0800h.
     sub bx,0x0800
     mov [cs:mrt_tpa_len],bx
+    add bx,0x0800
+    mov cl,6
+    shr bx,cl
+    mov [cs:ram_kib],bx
 .done:
     mov [RAM_PROBE_OFF],al
     pop es
@@ -645,7 +646,11 @@ SETIOBF:
     mov [iobyte],cl
     ret
 
-hello db 'FM-11 CP/M-86 BIOS: serial initialized',13,10,0
+init_msg db 13,10,'CP/M-86 v1.1 for FM-11 series',13,10,0
+ram_msg db 13,10,'        RAM ',0
+tpa_msg db 'KiB / TPA ',0
+kib_crlf_msg db 'KiB',13,10,13,10,0
+ram_kib dw 0
 wboot_sync_error_msg db 13,10,'WBOOT: disk cache write-back failed. System halted.',13,10,0
 cur_disk db 0
 iobyte db 0                ; initialized in INIT; full byte kept for STAT
@@ -986,7 +991,54 @@ mrt:
 mrt_tpa_len:
     dw 0x7800
 
-local_hello db 'FM-11 CP/M-86 local console',13,10,0
+; Cold-start banner, using the selected console in both builds.
+print_startup:
+    mov si,init_msg
+    call console_puts
+    mov si,ram_msg
+    call console_puts
+    mov ax,[ram_kib]
+    call console_put_u16_dec
+    mov si,tpa_msg
+    call console_puts
+    mov ax,[mrt_tpa_len]    ; after reserving both cache windows
+    mov cl,6
+    shr ax,cl
+    call console_put_u16_dec
+    mov si,kib_crlf_msg
+    jmp console_puts
+
+; DS:SI = NUL-terminated text. CONOUT preserves CX/SI.
+console_puts:
+    lodsb
+    test al,al
+    jz .done
+    mov cl,al
+    call CONOUT
+    jmp console_puts
+.done:
+    ret
+
+; AX = unsigned decimal value. Use DI as digit count because
+; CONOUT takes its character argument in CL.
+console_put_u16_dec:
+    xor di,di
+    mov bx,10
+.convert:
+    xor dx,dx
+    div bx
+    push dx
+    inc di
+    test ax,ax
+    jnz .convert
+.emit:
+    pop cx
+    add cl,'0'
+    call CONOUT
+    dec di
+    jnz .emit
+    ret
+
 %include "src/cbios_local_console.inc"
 %include "src/cbios_ansi.inc"
 
