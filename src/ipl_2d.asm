@@ -268,4 +268,4 @@ wait_type1_idle:
 
 physical_cyl db 0xff
 
-times 0x200-($-$) db 0
+times 0x200-($-$$) db 0
