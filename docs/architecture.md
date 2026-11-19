@@ -198,6 +198,18 @@ on-disk restoration on a disposable image. The hardware/emulator
 integration path still requires guest execution. `READ` and `WRITE`
 return AX=0 on success and AX=1 on error.
 
+**Physical floppy positioning:** A:..H: each have an independent cached
+physical cylinder (FFh = unknown). The CBIOS masks the selected 8237 DMA
+channel, selects the drive, performs RESTORE if its position is unknown,
+restores the shared FDC TRACK register from the saved drive position, and
+issues SEEK only when the desired cylinder differs. Type I completion is
+bounded and checks BUSY and seek/not-ready errors. Failed attempts forget
+that drive's cylinder; cold initialization and successful cache reset or
+media re-login forget all eight positions. The latter allows direct-I/O
+utilities such as FORMAT to move heads without leaving stale CBIOS state.
+Logical HOME/SETTRK remain deferred; positioning occurs at physical I/O,
+including cache write-back to a drive other than the current BDOS drive.
+
 **2HD implementation:** Standard-FDC drives 0..3 use DMA channel 1,
 FD30h..FD35h, 26 physical sectors per side-track and 52 CP/M records.
 The 2HD DPB uses 4-KiB blocks (DSM=242, EXM=3), four reserved

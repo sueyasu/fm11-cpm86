@@ -24,12 +24,12 @@ cache_init:
     mov word [cache_dirty+2],0
     mov word [cache_dirty+4],0
     mov word [cache_dirty+6],0
-    ret
+    jmp fdc_forget_all
 
 ; Cache-wide invalidate is only safe once all dirty data was flushed.
 cache_invalidate:
     mov byte [cache_used],0
-    ret
+    jmp fdc_forget_all
 
 ; Map SI=window (0/1), BX=physical sector (0..31) to
 ; DI=bitmap word offset (0,2,4,6), AX=single bit mask.

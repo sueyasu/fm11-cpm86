@@ -724,6 +724,8 @@ fdc2d_transfer:
     jc .retry_failed
     jmp .restore
 .retry_failed:
+    call fdc_position_index
+    mov byte [fdc_cylinder+si],0xff ; re-home after any failed attempt
     dec byte [fdc_attempts]
     jz .give_up
     ; Do not issue another command while the controller is transferring.
@@ -733,12 +735,21 @@ fdc2d_transfer:
     mov dl,0x30
 .retry_status:
     in al,dx
-    test al,0x02
+    test al,0x03            ; BUSY or DRQ: do not interrupt a live transfer
     jz .retry
 .give_up:
     jmp .bad
 
 .attempt:
+    ; Type I commands must never run with the selected DMA channel enabled.
+    mov dx,0x1a
+    mov al,4
+    add al,[fdc_channel]
+    out dx,al
+    call fdc_seek
+    jnc .positioned
+    ret
+.positioned:
     ; Convert the real-mode CS:offset into an 8237 bank:offset address.
     ; 256-byte transfer must not cross a 64 KiB DMA page boundary.
     mov ax,cs
@@ -754,10 +765,6 @@ fdc2d_transfer:
     mov si,ax                ; 16-bit DMA address
     mov di,dx                ; DMA bank (bits 16..19)
 
-    mov dx,0x1a             ; mask selected 8237 channel
-    mov al,4
-    add al,[fdc_channel]
-    out dx,al
     mov dx,0x1c             ; reset 8237 address/count flip-flop
     xor al,al
     out dx,al
@@ -795,14 +802,11 @@ fdc2d_transfer:
     mov dx,0x18             ; discard any previous terminal-count latch
     in al,dx
 
-    mov dx,0xfd19           ; 2D FD19/1A/1C/1D; 2HD FD31/32/34/35
+    mov dx,0xfd1a           ; sector register; track set by fdc_seek
     cmp byte [fdc_channel],0
-    je .track_port
-    mov dl,0x31
-.track_port:
-    mov al,ch
-    out dx,al
-    inc dx                  ; FD1A: sector
+    je .sector_port
+    mov dl,0x32
+.sector_port:
     mov al,cl
     out dx,al
     mov dx,0xfd1c           ; FD1C or FD34: side
@@ -841,7 +845,7 @@ fdc2d_transfer:
     in al,dx
     test al,0x10            ; Mini FDC error
     jnz .fail
-    test al,0x02            ; transfer in progress
+    test al,0x03            ; BUSY (bit 0) or DRQ (bit 1)
     jz .status_done
     loop .poll
     jmp .fail
@@ -884,12 +888,106 @@ fdc2d_transfer:
     pop ax
     ret
 
+; BL = physical unit, BH = 8237 mode (bit 0 is controller channel).
+; SI = position-table index, independent of the requested CP/M drive.
+fdc_position_index:
+    mov si,bx
+    and si,3
+    test bh,1
+    jz .done
+    add si,4
+.done:
+    ret
+
+; CH = desired cylinder, BL = unit, BH = DMA mode.
+; Preserve BX/CX/BP; only AX/DX/SI are scratch. DMA is masked by caller.
+; Each controller has one TRACK register shared by its four drives;
+; restore the selected drive's saved position BEFORE issuing SEEK.
+fdc_seek:
+    call fdc_position_index
+    mov dx,0xfd1d
+    cmp byte [fdc_channel],0
+    je .select
+    mov dl,0x35
+.select:
+    mov al,bl
+    out dx,al
+    sub dx,5                 ; FD18/FD30 command/status
+    call fdc_wait_idle
+    jc .done
+    mov al,[fdc_cylinder+si]
+    cmp al,0xff
+    jne .known
+    mov al,0x0b              ; RESTORE, no verify
+    call fdc_type1
+    jc .done
+    xor al,al
+    mov [fdc_cylinder+si],al
+.known:
+    inc dx                   ; restore controller TRACK register
+    out dx,al
+    dec dx
+    cmp al,ch
+    je .success
+    add dx,3                 ; DATA = requested SEEK destination
+    mov al,ch
+    out dx,al
+    sub dx,3
+    mov al,0x1b              ; SEEK, no verify
+    call fdc_type1
+    jc .done
+    mov [fdc_cylinder+si],ch
+.success:
+    clc
+.done:
+    ret
+
+; Wait for Type I completion. Bit 1 is INDEX, not DRQ in Type I status.
+; Allow BUSY to assert before polling; keep the requested CH/CL intact.
+fdc_type1:
+    out dx,al
+    push cx
+    mov cx,16
+.delay:
+    loop .delay
+    pop cx
+    call fdc_wait_idle
+    jc .done
+    test al,0x90             ; not ready or seek error
+    jz .done                 ; TEST clears CF
+    stc
+.done:
+    ret
+
+fdc_wait_idle:
+    push cx
+    mov cx,0xffff
+.poll:
+    in al,dx
+    test al,1
+    jz .done                 ; TEST clears CF
+    loop .poll
+    stc
+.done:
+    pop cx
+    ret
+
+; Cold init and cache reset/media login must forget hardware positions.
+; Keep registers and FLAGS unchanged (also used after direct-I/O utility).
+fdc_forget_all:
+    mov word [fdc_cylinder],0xffff
+    mov word [fdc_cylinder+2],0xffff
+    mov word [fdc_cylinder+4],0xffff
+    mov word [fdc_cylinder+6],0xffff
+    ret
+
 %include "src/cbios_hdd.inc"
 %include "src/cbios_track_cache.inc"
 
 ; DMA bounce buffer, never exposed as a logical CP/M record.
 fdc_channel db 0
 fdc_attempts db 0
+fdc_cylinder: times 8 db 0xff ; A:..H: unknown until RESTORE
 fdc2d_buffer: times 256 db 0
 
 ; Eight physical drives: A:..D: 2D/CH0, E:..H: 2HD/CH1.
