@@ -2,7 +2,7 @@ CP/M-86 1.1 Copyright and License
 =================================
 
 This distribution contains portions of CP/M-86 1.1 originally
-developed by Digital Research, Inc., including its standard utilities.
+developed by Digital Research, Inc.
 
 CP/M and its derivatives are made available under the permission
 granted by Bryan Sparks, President of DRDOS, Inc., as clarified on
@@ -20,21 +20,12 @@ CP/M is not placed in the public domain by this distribution.
 Copyright and other rights in the original CP/M materials remain
 with their respective rights holder(s).
 
-Personal BASIC
-==============
-
-Personal BASIC is a separate Digital Research product. Its original
-copyright and other rights remain with the respective rights holder(s).
-The CP/M permission cited above is not asserted here to grant a separate
-redistribution license for Personal BASIC. See the original product's
-applicable license or permission.
-
 The FM-11-specific bootstrap, CBIOS, utilities, and other
 original files in this distribution are separate works and are
 licensed under the terms stated elsewhere in this package.
 
 FM-11-specific Software
-=======================
+=============================
 
 The FM-11 bootstrap, CBIOS, and related source code written
 for this project are Copyright (c) 2026 SUEYASU Taizo.

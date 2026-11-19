@@ -79,9 +79,9 @@ FORMAT.CMDの作成手順は [command/README.md](command/README.md) を参照し
 
 ## 利用ライセンス
 
-自作部分（ブートコード、CBIOSおよび付属ユーティリティ）はMITライセンスを採用しています（[LICENSE](LICENSE)）。CP/M-86および標準コマンドのライセンスについては [LICENSE.CPM](LICENSE.CPM) を参照してください。
+自作部分（ブートコード、CBIOSおよび付属ユーティリティ）はMITライセンスを採用しています（[LICENSE](LICENSE)）。CP/Mのライセンスについては [LICENSE.CPM](LICENSE.CPM) を参照してください。
 
-ソースリポジトリにはCP/M-86のCCP/BDOSや標準コマンドのバイナリを収録していません。GitHub Releasesでは、標準コマンドを収録した2D／2HDの起動用ディスクイメージ（D88／HFE形式）を配布する予定です。Personal BASICについても収録を予定していますが、その配布には当該製品の許諾条件が適用され、MITライセンスの対象には含まれません。
+GitHub Releasesでは、標準コマンドを収録した2D／2HDの起動用ディスクイメージ（D88／HFE形式）を配布しています。ソースリポジトリにはCP/M-86のCCP/BDOSおよび標準コマンドのバイナリを収録していません。
 
 ## diskdefs
 
