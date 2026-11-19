@@ -2,7 +2,7 @@
 
 Use this to test the **actual CBIOS** without executing CCP/BDOS. The self-test replaces the CCP/BDOS core region (0x2500 bytes) in a disposable
 image, while the *real CBIOS remains 0x1900 bytes*. Its INIT entry jumps
-back to the self-test instead of the CCP cold entry. The regular `make boot`
+back to the self-test instead of the CCP cold entry. The regular `make boot-rom-2d`
 image and `build/cbios.bin` are unchanged.
 
 ## Build

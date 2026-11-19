@@ -8,7 +8,7 @@ CPM86_CORE ?= external/system/cpm86_core.bin
 # both image builders before a disk image is written.
 EXTERNAL_FILES := $(filter-out external/commands/README.md,$(sort $(wildcard external/commands/*)))
 
-.PHONY: all check-tools check-core bios rom diag cbios-diag boot boot-d88 boot-2hd boot-hdd hddipl-inc format-inc selftest check test clean
+.PHONY: all check-tools check-core bios rom diag cbios-diag boot boot-rom-2d boot-d88 boot-2d boot-2hd boot-hdd hddipl-inc format-inc selftest check test clean
 all: bios rom check
 
 check-tools:
@@ -73,33 +73,37 @@ hddipl-inc: command/HDIPL.INC
 # ASM86 FORMAT.A86 requires all three disk IPL include files.
 format-inc: command/FDIPL2D.INC command/FDIPL2HD.INC command/HDIPL.INC
 
-$(BUILD)/fm11_cpm86_2d.img: $(BUILD)/cbios.bin tests/build_boot_2d.py $(CPM86_CORE) $(EXTERNAL_FILES) | $(BUILD)
+$(BUILD)/fm11_cpm86_rom_2d.img: $(BUILD)/cbios.bin tests/build_boot_2d.py $(CPM86_CORE) $(EXTERNAL_FILES) | $(BUILD)
 	$(PYTHON) tests/build_boot_2d.py --core $(CPM86_CORE) --cbios $(BUILD)/cbios.bin \
 		$(foreach f,$(EXTERNAL_FILES),--file $(f)) $@
 
-boot: check-core $(BUILD)/iplrom.bin $(BUILD)/fm11_cpm86_2d.img
+boot-rom-2d: check-core $(BUILD)/iplrom.bin $(BUILD)/fm11_cpm86_rom_2d.img
 
-$(BUILD)/fm11_cpm86_boot_2d.d88: $(BUILD)/fm11_cpm86_2d.img $(BUILD)/ipl_2d.bin tests/build_boot_d88.py | $(BUILD)
-	$(PYTHON) tests/build_boot_d88.py --raw $(BUILD)/fm11_cpm86_2d.img \
-		--ipl $(BUILD)/ipl_2d.bin --raw-output $(BUILD)/fm11_cpm86_boot_2d.raw \
-		--output $@
+# Legacy aliases retain their original boot layouts.
+boot: boot-rom-2d
+boot-d88: boot-2d
 
-boot-d88: check-core $(BUILD)/fm11_cpm86_boot_2d.d88
-	$(PYTHON) tests/check_boot_d88.py $(BUILD)/fm11_cpm86_2d.img \
-		$(BUILD)/ipl_2d.bin $(BUILD)/fm11_cpm86_boot_2d.d88 \
-		$(BUILD)/fm11_cpm86_boot_2d.raw
+$(BUILD)/fm11_cpm86_2d.d88 $(BUILD)/fm11_cpm86_2d.raw &: $(BUILD)/fm11_cpm86_rom_2d.img $(BUILD)/ipl_2d.bin tests/build_boot_d88.py | $(BUILD)
+	$(PYTHON) tests/build_boot_d88.py --raw $(BUILD)/fm11_cpm86_rom_2d.img \
+		--ipl $(BUILD)/ipl_2d.bin --raw-output $(BUILD)/fm11_cpm86_2d.raw \
+		--output $(BUILD)/fm11_cpm86_2d.d88
+
+boot-2d: check-core $(BUILD)/fm11_cpm86_2d.d88 $(BUILD)/fm11_cpm86_2d.raw
+	$(PYTHON) tests/check_boot_d88.py $(BUILD)/fm11_cpm86_rom_2d.img \
+		$(BUILD)/ipl_2d.bin $(BUILD)/fm11_cpm86_2d.d88 \
+		$(BUILD)/fm11_cpm86_2d.raw
 
 
 # Native FM-11 2HD: mixed 128-byte FM boot track / 256-byte MFM tracks.
 # The 2HD resident is built separately with cold-start drive E:.
-$(BUILD)/fm11_cpm86_boot_2hd.d88: $(BUILD)/cbios_2hd.bin $(BUILD)/ipl_2hd.bin tests/build_boot_2hd.py tests/build_boot_2d.py $(CPM86_CORE) $(EXTERNAL_FILES) | $(BUILD)
+$(BUILD)/fm11_cpm86_2hd.d88 $(BUILD)/fm11_cpm86_2hd.raw &: $(BUILD)/cbios_2hd.bin $(BUILD)/ipl_2hd.bin tests/build_boot_2hd.py tests/build_boot_2d.py $(CPM86_CORE) $(EXTERNAL_FILES) | $(BUILD)
 	$(PYTHON) tests/build_boot_2hd.py --core $(CPM86_CORE) --cbios $(BUILD)/cbios_2hd.bin \
 		--ipl $(BUILD)/ipl_2hd.bin $(foreach f,$(EXTERNAL_FILES),--file $(f)) \
-		--raw-output $(BUILD)/fm11_cpm86_boot_2hd.raw --output $@
+		--raw-output $(BUILD)/fm11_cpm86_2hd.raw --output $(BUILD)/fm11_cpm86_2hd.d88
 
-boot-2hd: check-core $(BUILD)/fm11_cpm86_boot_2hd.d88
+boot-2hd: check-core $(BUILD)/fm11_cpm86_2hd.d88 $(BUILD)/fm11_cpm86_2hd.raw
 	$(PYTHON) tests/check_boot_2hd.py $(BUILD)/ipl_2hd.bin $(BUILD)/cbios_2hd.bin \
-		$(BUILD)/fm11_cpm86_boot_2hd.raw $(BUILD)/fm11_cpm86_boot_2hd.d88
+		$(BUILD)/fm11_cpm86_2hd.raw $(BUILD)/fm11_cpm86_2hd.d88
 
 
 # FM-11 MDC whole-HDD CP/M-86 I: (no partition table).

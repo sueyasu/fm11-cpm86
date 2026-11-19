@@ -25,7 +25,7 @@ mkdir -p external/system
 dd if=old_boot_2d.raw of=external/system/cpm86_core.bin bs=1 skip=512 count=9472 status=none
 ```
 
-独自IPL ROM用の `fm11_cpm86_2d.img` ではコアは先頭に配置されています（skip=0）。D88や2HD RAWでは配置が異なるため、上記の抽出コマンドはそのまま使用しないでください。
+独自IPL ROM用の `fm11_cpm86_rom_2d.img` ではコアは先頭に配置されています（skip=0）。D88や2HD RAWでは配置が異なるため、上記の抽出コマンドはそのまま使用しないでください。
 
 ## コマンドの収録
 
@@ -38,16 +38,18 @@ dd if=old_boot_2d.raw of=external/system/cpm86_core.bin bs=1 skip=512 count=9472
 ## 起動用FDイメージの作成
 
 ```sh
-make boot-d88
+make boot-2d
 make boot-2hd
 ```
+
+各ターゲットは対応するD88とRAWを同時に生成します。片方だけ削除した場合も再生成されます。
 
 生成されるファイル：
 
 | メディア | D88 | RAW |
 |---|---|---|
-| 2D | build/fm11_cpm86_boot_2d.d88 | build/fm11_cpm86_boot_2d.raw |
-| 2HD | build/fm11_cpm86_boot_2hd.d88 | build/fm11_cpm86_boot_2hd.raw |
+| 2D | build/fm11_cpm86_2d.d88 | build/fm11_cpm86_2d.raw |
+| 2HD | build/fm11_cpm86_2hd.d88 | build/fm11_cpm86_2hd.raw |
 
 2Dは40シリンダ、2ヘッド、16セクタ／トラック、256バイト／セクタ（320 KiB）です。2HDは77シリンダ、2ヘッド、26セクタ／トラックで、先頭の面トラックのみ128バイトFM、その他は256バイトMFMです。2HDのRAWは全セクタを256バイトのスロットで表した形式であり、実際の混在セクタ形式を保持するD88を起動用に推奨します。
 
@@ -108,7 +110,7 @@ ram_kib = 512
 
 ```ini
 [floppy_2d]
-drive0 = /path/to/fm11_cpm86_boot_2d.d88
+drive0 = /path/to/fm11_cpm86_2d.d88
 ```
 
 2HD起動：
@@ -118,7 +120,7 @@ drive0 = /path/to/fm11_cpm86_boot_2d.d88
 2HD_FDD = true
 
 [floppy_2hd]
-drive0 = /path/to/fm11_cpm86_boot_2hd.d88
+drive0 = /path/to/fm11_cpm86_2hd.d88
 ```
 
 2D／2HDでは、使用するFDDに対応する元の8088フロッピーブートROMを用いて起動します。
@@ -145,10 +147,10 @@ fm11-sdl --config /path/to/fm11emu.conf --8088-rom /path/to/hdd_bootrom.bin
 元の8088ブートROMの代わりに、本移植の2D専用IPL ROMを用いることもできます。
 
 ```sh
-make boot
+make boot-rom-2d
 ```
 
-生成された `build/iplrom.bin` を8088ブートROMとして指定し、`build/fm11_cpm86_2d.img` を2D FDD 0にセットします。このRAWイメージはディスクIPL付きのboot-d88用イメージとはシステム領域の配置が異なります。
+生成された `build/iplrom.bin` を8088ブートROMとして指定し、`build/fm11_cpm86_rom_2d.img` を2D FDD 0にセットします。このRAWイメージはディスクIPL付きのboot-2d用イメージとはシステム領域の配置が異なります。
 
 ## シリアル端末を初期コンソールとするビルド
 
@@ -156,17 +158,17 @@ make boot
 
 ```sh
 make clean
-make NASM='nasm -DCONSOLE_LOCAL=0' boot-d88 boot-2hd boot-hdd
+make NASM='nasm -DCONSOLE_LOCAL=0' boot-2d boot-2hd boot-hdd
 ```
 
-独自IPL ROM（make boot）およびHDD起動ROMのシリアル版では、端末接続後にキーを1つ入力して起動を開始します。コンパイル条件の切り替え時はmake cleanを行ってください。buildディレクトリ内の既存イメージは削除されます。
+独自IPL ROM（make boot-rom-2d）およびHDD起動ROMのシリアル版では、端末接続後にキーを1つ入力して起動を開始します。コンパイル条件の切り替え時はmake cleanを行ってください。buildディレクトリ内の既存イメージは削除されます。
 
 ## ファイルの追加・削除と再生成
 
 external/commandsのファイルを追加・削除した後は、必要に応じてmake -Bでイメージを再作成します。
 
 ```sh
-make -B boot-d88
+make -B boot-2d
 make -B boot-2hd
 ```
 

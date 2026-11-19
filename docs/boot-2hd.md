@@ -15,8 +15,8 @@ Provide the external 0x2500-byte CP/M-86 core at
 
 Outputs are `build/ipl_2hd.bin` (512 bytes),
 `build/cbios_2hd.bin` (0x1900 bytes),
-`build/fm11_cpm86_boot_2hd.raw` (256-byte slot representation), and
-`build/fm11_cpm86_boot_2hd.d88` (native mixed-sector D88).
+`build/fm11_cpm86_2hd.raw` (256-byte slot representation), and
+`build/fm11_cpm86_2hd.d88` (native mixed-sector D88).
 
 ## Physical layout
 

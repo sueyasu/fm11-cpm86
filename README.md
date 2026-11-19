@@ -1,6 +1,6 @@
 # CP/M-86 v1.1 for Fujitsu FM-11
 
-富士通FM-11向けのCP/M-86 v1.1移植です。2D／2HDの起動用FDイメージおよびHDDイメージを、リポジトリ内のソースと外部に用意したCP/M-86 CCP/BDOSコアから生成できます。詳しい手順は [BUILD.md](BUILD.md) を参照してください。
+富士通FM-11向けのCP/M-86 v1.1移植です。2D／2HDの起動用FDイメージおよびHDDイメージを、リポジトリ内のソースと外部に用意したCP/M-86 CCP/BDOSコアから生成できます。FDイメージは `make boot-2d` または `make boot-2hd` で、D88形式とRAW形式を同時に生成できます。詳しい手順は [BUILD.md](BUILD.md) を参照してください。
 
 ## 動作環境
 

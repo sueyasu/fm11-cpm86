@@ -14,3 +14,10 @@ jobs:
           make build/cbios.bin
           make test
           make build/cbios_selftest_resident.bin
+      - name: Verify symmetric floppy image targets
+        run: |
+          make -j2 boot-2d boot-2hd CPM86_CORE=build/test_2hd_core.bin
+          rm build/fm11_cpm86_2d.raw build/fm11_cpm86_2hd.raw
+          make -j2 boot-2d boot-2hd CPM86_CORE=build/test_2hd_core.bin
+          rm build/fm11_cpm86_2d.d88 build/fm11_cpm86_2hd.d88
+          make -j2 boot-2d boot-2hd CPM86_CORE=build/test_2hd_core.bin

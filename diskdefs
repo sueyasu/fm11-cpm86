@@ -9,10 +9,10 @@
 # No sector skew or per-image header.
 #
 # Read with:
-#   cpmls -f fm11-cpm86-2d -d diskdefs build/fm11_cpm86_2d.img
-#   cpmls -f fm11-cpm86-2d -d diskdefs -l build/fm11_cpm86_2d.img
+#   cpmls -f fm11-cpm86-2d -d diskdefs build/fm11_cpm86_2d.raw
+#   cpmls -f fm11-cpm86-2d -d diskdefs -l build/fm11_cpm86_2d.raw
 # Copy a file out (do not edit original while debugging):
-#   cpmcp -f fm11-cpm86-2d -d diskdefs build/fm11_cpm86_2d.img 0:ASM86.CMD .
+#   cpmcp -f fm11-cpm86-2d -d diskdefs build/fm11_cpm86_2d.raw 0:ASM86.CMD .
 diskdef fm11-cpm86-2d
   seclen 256
   tracks 80

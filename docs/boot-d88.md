@@ -1,26 +1,25 @@
 # FM-11 CP/M-86 2D disk IPL / D88 image
 
-`make boot-d88` produces a disk image for testing with an FM-11
+`make boot-2d` produces a disk image for testing with an FM-11
 emulator using a floppy-loading 8088 boot ROM, rather than the temporary
 4-KiB serial IPL ROM from `src/iplrom.asm`.
 
-Requirements are identical to `make boot`: NASM, Python 3, the
+Requirements are identical to `make boot-rom-2d`: NASM, Python 3, the
 0x2500-byte `external/system/cpm86_core.bin`, and the desired
 `external/commands/*.CMD` binaries.
 
 ```sh
 git pull
-make boot-d88
+make boot-2d
 ```
 
 Outputs:
 
 - `build/ipl_2d.bin` — 512-byte 8088 floppy IPL
-- `build/fm11_cpm86_boot_2d.raw` — 327680-byte IPL-equipped raw 2D disk
-- `build/fm11_cpm86_boot_2d.d88` — D88 disk with standard CHRN headers
+- `build/fm11_cpm86_2d.raw` — 327680-byte IPL-equipped raw 2D disk
+- `build/fm11_cpm86_2d.d88` — D88 disk with standard CHRN headers
 
-No changes are made to `build/fm11_cpm86_2d.img`, which retains the
-original ROM IPL-compatible layout.
+The intermediate `build/fm11_cpm86_rom_2d.img` retains the original ROM IPL-compatible layout and is distinct from the standard bootable RAW output.
 
 ## Layout
 
