@@ -2,7 +2,7 @@
 
 Use this to test the **actual CBIOS** without executing CCP/BDOS. The self-test replaces the CCP/BDOS core region (0x2500 bytes) in a disposable
 image, while the *real CBIOS remains 0x1900 bytes*. Its INIT entry jumps
-back to the self-test instead of the CCP cold entry. The regular `make boot-rom-2d`
+back to the self-test instead of the CCP cold entry. The regular `make boot-2d`
 image and `build/cbios.bin` are unchanged.
 
 ## Build
@@ -19,17 +19,17 @@ This creates:
 
 - `build/cbios_selftest_core.bin` — 0x2500-byte diagnostic replacement core
 - `build/cbios_selftest.bin` — 0x1900-byte CBIOS, INIT redirects to test core
-- `build/fm11_cpm86_selftest_2d.img` — separate disposable 320 KiB disk
-- `build/iplrom.bin` — same IPL ROM as the normal build
+- `build/fm11_cpm86_selftest_2d.d88` and `.raw` — disposable disk images with the standard 512-byte disk IPL
 
 **The self-test performs a WRITE and RESTORE on logical track 79,
 record 31. Never attach a valuable or original image.** Use only the
-`_selftest_2d.img` image from the build target and retain a copy if
+`_selftest_2d.d88` image from the build target and retain a copy if
 you intend to rerun it.
 
 Run FM-11 SDL with the normal 8088 CPU-card configuration and ROM options,
-but substitute the `_selftest_2d.img` for the ordinary CP/M-86 disk.
-The usual IPL consumes an initial character to allow PTY attachment.
+but substitute the `_selftest_2d.d88` for the ordinary CP/M-86 disk.
+Use the original FM-11 2D floppy boot ROM. Connect the serial terminal
+before booting; the disk IPL does not wait for an initial character.
 After it loads the resident image, the expected heading is:
 
 ```text

@@ -9,7 +9,6 @@ from pathlib import Path
 
 cbios = Path("src/cbios.asm").read_text()
 local = Path("src/cbios_local_console.inc").read_text()
-ipl = Path("src/iplrom.asm").read_text()
 hdd = Path("src/hdd_bootrom.asm").read_text()
 makefile = Path("Makefile").read_text()
 
@@ -61,19 +60,19 @@ assert "local_poll:" in local
 assert "local_const:" in local
 assert "local_conin:" in local
 
-for text, name in ((ipl, "2D reset ROM"), (hdd, "HDD reset ROM")):
+for text, name in ((hdd, "HDD reset ROM"),):
     assert "%if CONSOLE_LOCAL = 0" in text, f"{name}: local boot still waits for PTY"
     assert "%endif" in text
     assert "%define CONSOLE_LOCAL 1" in text
 
-for name in ("cbios_serial.bin", "iplrom_serial.bin", "hdd_bootrom_serial.bin"):
+for name in ("cbios_serial.bin", "hdd_bootrom_serial.bin"):
     assert name in makefile
 assert "tests/check_local_console.py" in makefile
 
 for name in ("cbios", "cbios_serial"):
     path = Path("build") / (name + ".bin")
     assert path.exists() and path.stat().st_size == 0x1900, name
-for name in ("iplrom", "iplrom_serial", "hdd_bootrom", "hdd_bootrom_serial"):
+for name in ("hdd_bootrom", "hdd_bootrom_serial"):
     path = Path("build") / (name + ".bin")
     assert path.exists() and path.stat().st_size == 0x1000, name
 

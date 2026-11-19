@@ -25,7 +25,7 @@ mkdir -p external/system
 dd if=old_boot_2d.raw of=external/system/cpm86_core.bin bs=1 skip=512 count=9472 status=none
 ```
 
-独自IPL ROM用の `fm11_cpm86_rom_2d.img` ではコアは先頭に配置されています（skip=0）。D88や2HD RAWでは配置が異なるため、上記の抽出コマンドはそのまま使用しないでください。
+D88や2HD RAWでは配置が異なるため、上記の抽出コマンドはそのまま使用しないでください。
 
 ## コマンドの収録
 
@@ -142,16 +142,6 @@ fm11-sdl --config /path/to/fm11emu.conf --8088-rom /path/to/hdd_bootrom.bin
 
 シリアル端末を利用する場合、エミュレータが表示するSerial PTYのパスに端末ソフトウェアを接続してください（例：`screen /dev/pts/5`）。
 
-## 独自IPL ROMを使用する2D起動
-
-元の8088ブートROMの代わりに、本移植の2D専用IPL ROMを用いることもできます。
-
-```sh
-make boot-rom-2d
-```
-
-生成された `build/iplrom.bin` を8088ブートROMとして指定し、`build/fm11_cpm86_rom_2d.img` を2D FDD 0にセットします。このRAWイメージはディスクIPL付きのboot-2d用イメージとはシステム領域の配置が異なります。
-
 ## シリアル端末を初期コンソールとするビルド
 
 通常はローカル画面が初期コンソールです。起動時からシリアル端末を使用する場合は、次のようにビルドできます。
@@ -161,7 +151,7 @@ make clean
 make NASM='nasm -DCONSOLE_LOCAL=0' boot-2d boot-2hd boot-hdd
 ```
 
-独自IPL ROM（make boot-rom-2d）およびHDD起動ROMのシリアル版では、端末接続後にキーを1つ入力して起動を開始します。コンパイル条件の切り替え時はmake cleanを行ってください。buildディレクトリ内の既存イメージは削除されます。
+HDD起動ROMのシリアル版では、端末接続後にキーを1つ入力して起動を開始します。コンパイル条件の切り替え時はmake cleanを行ってください。buildディレクトリ内の既存イメージは削除されます。
 
 ## ファイルの追加・削除と再生成
 

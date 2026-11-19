@@ -10,20 +10,14 @@ from build_boot_2d import (
 )
 
 
-def check(rom, bios_path):
-    bootrom = pathlib.Path(rom).read_bytes()
+def check(ipl_path, bios_path):
+    ipl = pathlib.Path(ipl_path).read_bytes()
     bios = pathlib.Path(bios_path).read_bytes()
-    assert len(bootrom) == 0x1000
-    assert bootrom[0xFF0:0xFF5] == bytes((0xEA, 0, 0, 0, 0xFF))
-    # The standalone IPL replaces the original FM-11 8088 boot ROM;
-    # retain its 8259 ICW1/ICW2/ICW4 + OCW1 all-masked setup.
-    assert bytes.fromhex(
-        "B0 1B E6 00 B0 08 E6 01 B0 09 E6 01 B0 FF E6 01"
-    ) in bootrom, "standalone IPL must initialize and mask the 8259 PIC"
-    for phrase in (b"FM-11 CP/M-86 2D IPL: loading resident",
-                   b"FM-11 CP/M-86 IPL: CBIOS vector OK, entering INIT",
-                   b"FAIL: resident sector read / DMA"):
-        assert phrase in bootrom
+    assert len(ipl) == 512
+    assert ipl[0] == 0xEB
+    # The actual disk IPL must issue Type I commands.
+    assert bytes.fromhex("b0 0b") in ipl
+    assert bytes.fromhex("b0 1b") in ipl
     assert len(bios) == BIOS_SIZE
     core = bytes(i & 0xFF for i in range(CORE_SIZE))
     image = build_image(core, bios)
@@ -142,10 +136,10 @@ def check(rom, bios_path):
         else:
             raise AssertionError("directory overflow accepted")
 
-    print("PASS: IPL ROM, 2D image, CMD directory, extents and allocation maps")
+    print("PASS: disk IPL, 2D image, CMD directory, extents and allocation maps")
 
 
 if __name__ == "__main__":
     if len(sys.argv) != 3:
-        raise SystemExit("usage: check_boot_2d.py IPLROM.bin CBIOS.bin")
+        raise SystemExit("usage: check_boot_2d.py IPL_2D.bin CBIOS.bin")
     check(*sys.argv[1:])

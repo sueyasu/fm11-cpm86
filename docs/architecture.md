@@ -18,7 +18,7 @@ The existing `pc98_cpm86` resident image has a 0x2500-byte externally
 provided CCP/BDOS core followed by BIOS at offset 2500h, using a 0x1900
 byte BIOS area. This project initially reserves the same offsets and
 retains the CBIOS 21-entry jump table, 
-The experimental 2D IPL ROM now loads this resident image at segment
+The 2D and 2HD disk IPLs load this resident image at segment
 0400h and enters CBIOS INIT at 0400:2500. The initial BIOS stack tops
 out at 0400:4000 (physical 08000h), below the TPA base at segment 0800h. The CCP/BDOS boot has been verified in the emulator.
 
@@ -101,8 +101,7 @@ subsystem command 12h. The BIOS keeps its 21-entry vector order,
 CBIOS 1900h-byte length and BOOT_DRIVE patch immediate position.
 
 Native local console is the default CBIOS build; `CONSOLE_LOCAL=0`
-at NASM assembly time selects the original serial path. The 2D and
-HDD reset ROMs also skip the optional serial-PTY input gate in the
+at NASM assembly time selects the original serial path. The HDD reset ROM also skips the optional serial-PTY input gate in the
 local build. `LISTOUT` and `PUNCH` continue using USART0.
 
 The local output now also translates the supported ANSI/VT100 sequences through src/cbios_ansi.inc. The emulator's 8088 `Main8088Bus`

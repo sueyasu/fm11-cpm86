@@ -8,7 +8,7 @@ CPM86_CORE ?= external/system/cpm86_core.bin
 # both image builders before a disk image is written.
 EXTERNAL_FILES := $(filter-out external/commands/README.md,$(sort $(wildcard external/commands/*)))
 
-.PHONY: all check-tools check-core bios rom diag cbios-diag boot boot-rom-2d boot-d88 boot-2d boot-2hd boot-hdd hddipl-inc format-inc selftest check test clean
+.PHONY: all check-tools check-core bios rom diag cbios-diag boot boot-d88 boot-2d boot-2hd boot-hdd hddipl-inc format-inc selftest check test clean
 all: bios rom check
 
 check-tools:
@@ -38,16 +38,10 @@ $(BUILD)/cbios_selftest_core.bin $(BUILD)/cbios_selftest.bin &: $(BUILD)/cbios_s
 $(BUILD)/cbios_serial.bin: src/cbios.asm src/cbios_local_console.inc src/cbios_ansi.inc src/cbios_hdd.inc src/cbios_track_cache.inc | $(BUILD)
 	$(NASM) -f bin -DCONSOLE_LOCAL=0 $< -o $@
 
-$(BUILD)/iplrom_serial.bin: src/iplrom.asm | $(BUILD)
-	$(NASM) -f bin -DCONSOLE_LOCAL=0 $< -o $@
-
 $(BUILD)/hdd_bootrom_serial.bin: src/hdd_bootrom.asm src/hdd_boot_io.inc | $(BUILD)
 	$(NASM) -f bin -DCONSOLE_LOCAL=0 $< -o $@
 
 $(BUILD)/bootrom.bin: src/bootrom.asm | $(BUILD)
-	$(NASM) -f bin $< -o $@
-
-$(BUILD)/iplrom.bin: src/iplrom.asm | $(BUILD)
 	$(NASM) -f bin $< -o $@
 
 # 512-byte disk IPL, distinct from the 4-KiB reset ROM.
@@ -73,23 +67,21 @@ hddipl-inc: command/HDIPL.INC
 # ASM86 FORMAT.A86 requires all three disk IPL include files.
 format-inc: command/FDIPL2D.INC command/FDIPL2HD.INC command/HDIPL.INC
 
-$(BUILD)/fm11_cpm86_rom_2d.img: $(BUILD)/cbios.bin tests/build_boot_2d.py $(CPM86_CORE) $(EXTERNAL_FILES) | $(BUILD)
+$(BUILD)/fm11_cpm86_2d_stage.img: $(BUILD)/cbios.bin tests/build_boot_2d.py $(CPM86_CORE) $(EXTERNAL_FILES) | $(BUILD)
 	$(PYTHON) tests/build_boot_2d.py --core $(CPM86_CORE) --cbios $(BUILD)/cbios.bin \
 		$(foreach f,$(EXTERNAL_FILES),--file $(f)) $@
 
-boot-rom-2d: check-core $(BUILD)/iplrom.bin $(BUILD)/fm11_cpm86_rom_2d.img
-
-# Legacy aliases retain their original boot layouts.
-boot: boot-rom-2d
+# Compatibility aliases use the standard disk IPL layout.
+boot: boot-2d
 boot-d88: boot-2d
 
-$(BUILD)/fm11_cpm86_2d.d88 $(BUILD)/fm11_cpm86_2d.raw &: $(BUILD)/fm11_cpm86_rom_2d.img $(BUILD)/ipl_2d.bin tests/build_boot_d88.py | $(BUILD)
-	$(PYTHON) tests/build_boot_d88.py --raw $(BUILD)/fm11_cpm86_rom_2d.img \
+$(BUILD)/fm11_cpm86_2d.d88 $(BUILD)/fm11_cpm86_2d.raw &: $(BUILD)/fm11_cpm86_2d_stage.img $(BUILD)/ipl_2d.bin tests/build_boot_d88.py | $(BUILD)
+	$(PYTHON) tests/build_boot_d88.py --raw $(BUILD)/fm11_cpm86_2d_stage.img \
 		--ipl $(BUILD)/ipl_2d.bin --raw-output $(BUILD)/fm11_cpm86_2d.raw \
 		--output $(BUILD)/fm11_cpm86_2d.d88
 
 boot-2d: check-core $(BUILD)/fm11_cpm86_2d.d88 $(BUILD)/fm11_cpm86_2d.raw
-	$(PYTHON) tests/check_boot_d88.py $(BUILD)/fm11_cpm86_rom_2d.img \
+	$(PYTHON) tests/check_boot_d88.py $(BUILD)/fm11_cpm86_2d_stage.img \
 		$(BUILD)/ipl_2d.bin $(BUILD)/fm11_cpm86_2d.d88 \
 		$(BUILD)/fm11_cpm86_2d.raw
 
@@ -149,17 +141,21 @@ $(BUILD)/test_2hd.d88: $(BUILD)/test_2hd_core.bin $(BUILD)/cbios_2hd.bin $(BUILD
 # ASM86.CMD is fixed as the first entry for the READ-data assertion.
 SELFTEST_ASM86 := $(firstword $(wildcard external/commands/ASM86.CMD external/commands/asm86.cmd))
 
-$(BUILD)/fm11_cpm86_selftest_2d.img: $(BUILD)/cbios_selftest_core.bin $(BUILD)/cbios_selftest.bin tests/build_boot_2d.py $(SELFTEST_ASM86) | $(BUILD)
+$(BUILD)/fm11_cpm86_selftest_2d_stage.img: $(BUILD)/cbios_selftest_core.bin $(BUILD)/cbios_selftest.bin tests/build_boot_2d.py $(SELFTEST_ASM86) | $(BUILD)
 	@test -n "$(SELFTEST_ASM86)" || { echo "missing external/commands/ASM86.CMD for self-test" >&2; exit 1; }
 	$(PYTHON) tests/build_boot_2d.py --core $(BUILD)/cbios_selftest_core.bin --cbios $(BUILD)/cbios_selftest.bin \
 		--file "$(SELFTEST_ASM86)" $@
 
-selftest: $(BUILD)/iplrom.bin $(BUILD)/fm11_cpm86_selftest_2d.img
-	$(PYTHON) tests/check_layout.py $(BUILD)/cbios_selftest.bin $(BUILD)/iplrom.bin
-	@echo "SELFTEST: boot with build/iplrom.bin and build/fm11_cpm86_selftest_2d.img"
+$(BUILD)/fm11_cpm86_selftest_2d.d88 $(BUILD)/fm11_cpm86_selftest_2d.raw &: $(BUILD)/fm11_cpm86_selftest_2d_stage.img $(BUILD)/ipl_2d.bin tests/build_boot_d88.py
+	$(PYTHON) tests/build_boot_d88.py --raw $(BUILD)/fm11_cpm86_selftest_2d_stage.img \
+		--ipl $(BUILD)/ipl_2d.bin --raw-output $(BUILD)/fm11_cpm86_selftest_2d.raw \
+		--output $(BUILD)/fm11_cpm86_selftest_2d.d88
+
+selftest: $(BUILD)/fm11_cpm86_selftest_2d.d88 $(BUILD)/fm11_cpm86_selftest_2d.raw $(BUILD)/bootrom.bin
+	$(PYTHON) tests/check_layout.py $(BUILD)/cbios_selftest.bin $(BUILD)/bootrom.bin
+	$(PYTHON) tests/check_boot_d88.py $(BUILD)/fm11_cpm86_selftest_2d_stage.img $(BUILD)/ipl_2d.bin $(BUILD)/fm11_cpm86_selftest_2d.d88 $(BUILD)/fm11_cpm86_selftest_2d.raw
+	@echo "SELFTEST: use the standard FM-11 2D boot ROM and build/fm11_cpm86_selftest_2d.d88"
 	@echo "WARNING: self-test writes/restores the last record; use only this disposable image."
-
-
 
 $(BUILD)/fdc2d_diag.bin: src/fdc2d_diag.asm | $(BUILD)
 	$(NASM) -f bin $< -o $@
@@ -179,7 +175,7 @@ diag: $(BUILD)/fdc2d_diag.bin
 check: $(BUILD)/cbios.bin $(BUILD)/bootrom.bin
 	$(PYTHON) tests/check_layout.py $(BUILD)/cbios.bin $(BUILD)/bootrom.bin
 
-test: check diag cbios-diag $(BUILD)/iplrom.bin $(BUILD)/test_2hd.d88 $(BUILD)/test_hdd.img $(BUILD)/hdd_bootrom.bin $(BUILD)/cbios_serial.bin $(BUILD)/iplrom_serial.bin $(BUILD)/hdd_bootrom_serial.bin format-inc
+test: check diag cbios-diag $(BUILD)/ipl_2d.bin $(BUILD)/test_2hd.d88 $(BUILD)/test_hdd.img $(BUILD)/hdd_bootrom.bin $(BUILD)/cbios_serial.bin $(BUILD)/hdd_bootrom_serial.bin format-inc
 	$(PYTHON) tests/check_boot_2hd.py $(BUILD)/ipl_2hd.bin $(BUILD)/cbios_2hd.bin \
 		$(BUILD)/test_2hd.raw $(BUILD)/test_2hd.d88
 	$(PYTHON) tests/check_fdformat_inc.py $(BUILD)/ipl_2d.bin $(BUILD)/ipl_2hd.bin command/FDIPL2D.INC command/FDIPL2HD.INC
@@ -199,7 +195,7 @@ test: check diag cbios-diag $(BUILD)/iplrom.bin $(BUILD)/test_2hd.d88 $(BUILD)/t
 	$(PYTHON) tests/check_cache_api.py $(BUILD)/cbios.bin $(BUILD)/cbios_2hd.bin $(BUILD)/cbios_hdd.bin $(BUILD)/cbios_serial.bin
 	$(PYTHON) tests/check_diag.py $(BUILD)/fdc2d_diag.bin
 	$(PYTHON) tests/check_cbios_diag.py $(BUILD)/cbios_diag.bin $(BUILD)/cbios_diag_2d.img $(BUILD)/cbios.bin
-	$(PYTHON) tests/check_boot_2d.py $(BUILD)/iplrom.bin $(BUILD)/cbios.bin
+	$(PYTHON) tests/check_boot_2d.py $(BUILD)/ipl_2d.bin $(BUILD)/cbios.bin
 
 check-core:
 	@test -f "$(CPM86_CORE)" || { echo "missing external CP/M-86 core: $(CPM86_CORE)" >&2; exit 1; }

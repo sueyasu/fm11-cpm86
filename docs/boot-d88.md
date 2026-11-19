@@ -1,10 +1,9 @@
 # FM-11 CP/M-86 2D disk IPL / D88 image
 
 `make boot-2d` produces a disk image for testing with an FM-11
-emulator using a floppy-loading 8088 boot ROM, rather than the temporary
-4-KiB serial IPL ROM from `src/iplrom.asm`.
+emulator using the original FM-11 floppy-loading 8088 boot ROM.
 
-Requirements are identical to `make boot-rom-2d`: NASM, Python 3, the
+Requirements: NASM, Python 3, the
 0x2500-byte `external/system/cpm86_core.bin`, and the desired
 `external/commands/*.CMD` binaries.
 
@@ -19,7 +18,7 @@ Outputs:
 - `build/fm11_cpm86_2d.raw` — 327680-byte IPL-equipped raw 2D disk
 - `build/fm11_cpm86_2d.d88` — D88 disk with standard CHRN headers
 
-The intermediate `build/fm11_cpm86_rom_2d.img` retains the original ROM IPL-compatible layout and is distinct from the standard bootable RAW output.
+The intermediate `build/fm11_cpm86_2d_stage.img` is a build-only filesystem staging image, not a bootable disk.
 
 ## Layout
 
@@ -36,6 +35,7 @@ order and sector IDs are 1..16, N=1.
 
 The disk IPL loads 62 sectors from C0/H0/S3 onward into physical RAM
 04000h..07DFFh and jumps to 0400:2500, the resident CBIOS INIT vector.
+The disk IPL issues RESTORE with DMA masked and SEEK at cylinder transitions.
 CBIOS is still assembled at ORG 2500h, and its DPB OFF=4 and all file
 allocation values are unchanged.
 
@@ -54,7 +54,7 @@ its full 512 bytes to `0100:0000` (physical `01000h`), and jumps there
 sectors would overwrite the running IPL at physical `07C00h`.
 
 The image still uses the same 8237 DMA / Mini-FDC interfaces as the
-experimental 8088 loader, and its disk geometry matches the original
+CBIOS, and its disk geometry matches the original
 emulator's D88 parser (`MainCpu.cpp`, `MainCpu.h`). It has not yet been
 executed on the uploaded original emulator, so this is a source-level
 compatibility fix rather than a confirmed successful boot.
