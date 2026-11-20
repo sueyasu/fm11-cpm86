@@ -101,8 +101,8 @@ subsystem command 12h. The BIOS keeps its 21-entry vector order,
 CBIOS 1900h-byte length and BOOT_DRIVE patch immediate position.
 
 Native local console is the default CBIOS build; `CONSOLE_LOCAL=0`
-at NASM assembly time selects the original serial path. The HDD reset ROM also skips the optional serial-PTY input gate in the
-local build. `LISTOUT` and `PUNCH` continue using USART0.
+at NASM assembly time selects the original serial path. The HDD IPL is loaded by the original Fujitsu 8088 reset ROM;
+there is no separate custom HDD ROM or serial-PTY gate. `LISTOUT` and `PUNCH` continue using USART0.
 
 The local output now also translates the supported ANSI/VT100 sequences through src/cbios_ansi.inc. The emulator's 8088 `Main8088Bus`
 routes `FC80h-FCFFh` to `MainBoard::displaySubsystem` and

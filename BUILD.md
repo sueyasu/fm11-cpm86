@@ -64,7 +64,8 @@ make boot-hdd HDD_MODEL=m2233b
 生成されるファイル：
 
 - `build/fm11_cpm86_boot_hdd.img` — HDD全体のRAWイメージ
-- `build/hdd_bootrom.bin` — HDD起動用8088ブートROM（4 KiB）
+- `build/ipl_hdd.bin` — HDDディスク先頭に書き込むIPL（512バイト）
+- `build/cbios_hdd.bin` — HDD起動用CBIOS
 
 HDD_MODELには次のモデルを指定できます（既定値はm2233b）。
 
@@ -132,11 +133,13 @@ HDD起動：
 image = /path/to/fm11_cpm86_boot_hdd.img
 ```
 
-HDD起動用ブートROMを指定して起動します。
+HDD起動にも富士通標準の8088ブートROMを使用します。設定済みの標準ROMは変更せず、専用ROMの`--8088-rom`指定を加えずに起動してください。エミュレータでHDD起動を選択するため、`[DIPSW]`の`HDD = true`など、使用している設定に合ったブート機器設定も必要です。
 
 ```sh
-fm11-sdl --config /path/to/fm11emu.conf --8088-rom /path/to/hdd_bootrom.bin
+fm11-sdl --config /path/to/fm11emu.conf
 ```
+
+標準ROMからこのCP/M-86 HDD IPLへの引き渡しは、CP/M-80版の実績とIPLのソース構造から互換性を見込んでいますが、CP/M-86版での実行確認はまだ必要です。
 
 画面用ROMなどは既存設定に従います。ローカルコンソール版では、起動のためにシリアル端末でキーを入力する必要はありません。
 
@@ -151,7 +154,7 @@ make clean
 make NASM='nasm -DCONSOLE_LOCAL=0' boot-2d boot-2hd boot-hdd
 ```
 
-HDD起動ROMのシリアル版では、端末接続後にキーを1つ入力して起動を開始します。コンパイル条件の切り替え時はmake cleanを行ってください。buildディレクトリ内の既存イメージは削除されます。
+専用HDDブートROMのシリアル版と、そのキー入力待ちは廃止しました。起動前の動作は標準ROMの仕様に従います。コンパイル条件の切り替え時はmake cleanを行ってください。buildディレクトリ内の既存イメージは削除されます。
 
 ## ファイルの追加・削除と再生成
 

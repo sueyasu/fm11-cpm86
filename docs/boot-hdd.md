@@ -18,14 +18,16 @@ The default bootable raw HDD image has:
 | Cylinder 1 onward | CP/M-86 I: filesystem |
 | First 16 KiB of filesystem | 512-entry CP/M directory (E5h empty) |
 
-The host 8088 reset ROM `hdd_bootrom.bin` is a **separate** 4-KiB
-boot loader: it reads the two HDD IPL sectors into 07C0:0000 and
-transfers control to the IPL. The IPL relocates to 0100:0000,
+The standard Fujitsu 8088 boot ROM reads the first two HDD sectors
+(LBA 0–1) into 07C0:0000 and transfers control to the 512-byte on-disk
+IPL. The IPL relocates to 0100:0000, switches MDC into binary-LBA mode,
 loads the 0x3E00-byte resident at 0400:0000 and enters CBIOS INIT.
-The binary LBA command of the MDC (command 11h, parameter 70h) and
-DMA channel 2 are used throughout. This is a purpose-built 8088
-boot ROM, **not a claim that Fujitsu's original 8088 ROM already
-understands CP/M-86 HDD IPLs**.
+The disk IPL uses the MDC command 11h (parameter 70h) and DMA channel 2.
+The custom 4-KiB HDD reset ROM has been removed; the shared
+`src/hdd_boot_io.inc` is still required by `src/ipl_hdd.asm`.
+
+The standard-ROM handoff was established during FM-11 CP/M-80 work.
+Actual standard-ROM boot of this CP/M-86 image is not yet verified.
 
 ## Drive parameters
 
@@ -51,7 +53,6 @@ make boot-hdd HDD_MODEL=m2233b
 
 Outputs:
 
-- `build/hdd_bootrom.bin` – 4-KiB 8088 boot ROM
 - `build/ipl_hdd.bin` – 512-byte on-disk HDD IPL
 - `build/cbios_hdd.bin` – 0x1900-byte CBIOS booting on I:
 - `build/fm11_cpm86_boot_hdd.img` – whole-HDD raw image
@@ -65,16 +66,16 @@ single raw HDD image:
 image = /absolute/path/to/fm11_cpm86_boot_hdd.img
 ```
 
-Start the emulator with the appropriate display/ANK ROM settings
-from your existing working 8088 configuration, overriding only its
-8088 CPU boot ROM:
+Keep the original Fujitsu 8088 ROM configured, including the existing
+display/ANK ROMs. Enable HDD boot selection in the emulator DIP-switch
+configuration. Do not override `--8088-rom` with a custom HDD ROM:
 
 ```sh
-fm11-sdl --config /path/to/fm11emu.conf \
-  --8088-rom /path/to/fm11-cpm86/build/hdd_bootrom.bin
+fm11-sdl --config /path/to/fm11emu.conf
 ```
 
-The default local-console ROM starts immediately. Only the serial-console build (CONSOLE_LOCAL=0) waits for a character on the serial PTY before loading the HDD IPL.
+The standard boot ROM, not the CP/M-86 CBIOS console option, controls
+any input wait before the disk IPL starts.
 The IPL boots CP/M-86 with initial drive `I:` (drive number 8).
 Do not mount this HDD image concurrently elsewhere.
 
@@ -82,8 +83,9 @@ Do not mount this HDD image concurrently elsewhere.
 binary used by the unified FORMAT /S command. See [command instructions](../command/README.md).
 
 **Validation status:** NASM and image-structure checks run in GitHub
-Actions, including the I: INIT boot-drive value, boot ROM size, IPL,
-and resident layout. Real hardware validation and testing every supported geometry remain necessary. Use disposable images for destructive tests.
+Actions, including the I: INIT boot-drive value, the 512-byte disk IPL,
+and resident layout. These structural checks do not prove execution of
+the original ROM boot path. Real hardware validation and testing every supported geometry remain necessary. Use disposable images for destructive tests.
 
 ## Supported models
 

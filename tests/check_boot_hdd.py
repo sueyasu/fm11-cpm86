@@ -1,13 +1,12 @@
 #!/usr/bin/env python3
-"""Verify the native FM-11 HDD ROM/ipl/CBIOS layout without CP/M core."""
+"""Verify the FM-11 HDD disk IPL/CBIOS layout without CP/M core."""
 import sys
 from pathlib import Path
 from build_boot_hdd import MODELS, BLOCK, SECTOR, SPT, RESIDENT_SIZE
 
 
-def check(rom, ipl, cbios, image, model):
+def check(ipl, cbios, image, model):
     c, heads = MODELS[model]
-    assert len(rom) == 4096 and rom[0xff0:0xff5] == bytes.fromhex("ea 00 00 00 ff")
     assert len(ipl) == 512 and ipl[0] == 0xfa
     assert len(cbios) == 0x1900 and cbios[0] == 0xe9
     assert len(image) == c*heads*SPT*SECTOR
@@ -58,10 +57,10 @@ def check(rom, ipl, cbios, image, model):
 
 
 def main():
-    if len(sys.argv) != 6:
-        raise SystemExit("usage: check_boot_hdd.py rom ipl cbios image model")
-    rom,ipl,cbios,image = (Path(x).read_bytes() for x in sys.argv[1:5])
-    check(rom,ipl,cbios,image,sys.argv[5])
+    if len(sys.argv) != 5:
+        raise SystemExit("usage: check_boot_hdd.py ipl cbios image model")
+    ipl, cbios, image = (Path(x).read_bytes() for x in sys.argv[1:4])
+    check(ipl, cbios, image, sys.argv[4])
 
 
 if __name__ == "__main__":

@@ -38,9 +38,6 @@ $(BUILD)/cbios_selftest_core.bin $(BUILD)/cbios_selftest.bin &: $(BUILD)/cbios_s
 $(BUILD)/cbios_serial.bin: src/cbios.asm src/cbios_local_console.inc src/cbios_ansi.inc src/cbios_hdd.inc src/cbios_track_cache.inc | $(BUILD)
 	$(NASM) -f bin -DCONSOLE_LOCAL=0 $< -o $@
 
-$(BUILD)/hdd_bootrom_serial.bin: src/hdd_bootrom.asm src/hdd_boot_io.inc | $(BUILD)
-	$(NASM) -f bin -DCONSOLE_LOCAL=0 $< -o $@
-
 $(BUILD)/bootrom.bin: src/bootrom.asm | $(BUILD)
 	$(NASM) -f bin $< -o $@
 
@@ -99,8 +96,9 @@ boot-2hd: check-core $(BUILD)/fm11_cpm86_2hd.d88 $(BUILD)/fm11_cpm86_2hd.raw
 
 
 # FM-11 MDC whole-HDD CP/M-86 I: (no partition table).
-# The reset ROM loads the on-disk 512-byte IPL, which loads the 0x3E00
-# resident image. Geometry defaults to M2233B; choose HDD_MODEL=m2243b etc.
+# The standard Fujitsu 8088 ROM loads the on-disk 512-byte IPL,
+# which loads the 0x3E00 resident image. Geometry defaults to M2233B;
+# choose HDD_MODEL=m2243b etc.
 HDD_MODEL ?= m2233b
 
 .PHONY: hdd_image_force
@@ -113,16 +111,13 @@ $(BUILD)/cbios_hdd.bin: src/cbios.asm src/cbios_local_console.inc src/cbios_ansi
 $(BUILD)/ipl_hdd.bin: src/ipl_hdd.asm src/hdd_boot_io.inc | $(BUILD)
 	$(NASM) -f bin $< -o $@
 
-$(BUILD)/hdd_bootrom.bin: src/hdd_bootrom.asm src/hdd_boot_io.inc | $(BUILD)
-	$(NASM) -f bin $< -o $@
-
 $(BUILD)/fm11_cpm86_boot_hdd.img: hdd_image_force $(BUILD)/cbios_hdd.bin $(BUILD)/ipl_hdd.bin tests/build_boot_hdd.py tests/build_boot_2d.py $(CPM86_CORE) $(EXTERNAL_FILES) | $(BUILD)
 	$(PYTHON) tests/build_boot_hdd.py --model $(HDD_MODEL) \
 		--ipl $(BUILD)/ipl_hdd.bin --core $(CPM86_CORE) --cbios $(BUILD)/cbios_hdd.bin \
 		$(foreach f,$(EXTERNAL_FILES),--file $(f)) $@
 
-boot-hdd: check-core $(BUILD)/hdd_bootrom.bin $(BUILD)/fm11_cpm86_boot_hdd.img
-	$(PYTHON) tests/check_boot_hdd.py $(BUILD)/hdd_bootrom.bin $(BUILD)/ipl_hdd.bin $(BUILD)/cbios_hdd.bin $(BUILD)/fm11_cpm86_boot_hdd.img $(HDD_MODEL)
+boot-hdd: check-core $(BUILD)/fm11_cpm86_boot_hdd.img
+	$(PYTHON) tests/check_boot_hdd.py $(BUILD)/ipl_hdd.bin $(BUILD)/cbios_hdd.bin $(BUILD)/fm11_cpm86_boot_hdd.img $(HDD_MODEL)
 
 $(BUILD)/test_hdd.img: $(BUILD)/test_2hd_core.bin $(BUILD)/cbios_hdd.bin $(BUILD)/ipl_hdd.bin tests/build_boot_hdd.py | $(BUILD)
 	$(PYTHON) tests/build_boot_hdd.py --model m2230b \
@@ -175,11 +170,11 @@ diag: $(BUILD)/fdc2d_diag.bin
 check: $(BUILD)/cbios.bin $(BUILD)/bootrom.bin
 	$(PYTHON) tests/check_layout.py $(BUILD)/cbios.bin $(BUILD)/bootrom.bin
 
-test: check diag cbios-diag $(BUILD)/ipl_2d.bin $(BUILD)/test_2hd.d88 $(BUILD)/test_hdd.img $(BUILD)/hdd_bootrom.bin $(BUILD)/cbios_serial.bin $(BUILD)/hdd_bootrom_serial.bin format-inc
+test: check diag cbios-diag $(BUILD)/ipl_2d.bin $(BUILD)/test_2hd.d88 $(BUILD)/test_hdd.img $(BUILD)/cbios_serial.bin format-inc
 	$(PYTHON) tests/check_boot_2hd.py $(BUILD)/ipl_2hd.bin $(BUILD)/cbios_2hd.bin \
 		$(BUILD)/test_2hd.raw $(BUILD)/test_2hd.d88
 	$(PYTHON) tests/check_fdformat_inc.py $(BUILD)/ipl_2d.bin $(BUILD)/ipl_2hd.bin command/FDIPL2D.INC command/FDIPL2HD.INC
-	$(PYTHON) tests/check_boot_hdd.py $(BUILD)/hdd_bootrom.bin $(BUILD)/ipl_hdd.bin $(BUILD)/cbios_hdd.bin $(BUILD)/test_hdd.img m2230b
+	$(PYTHON) tests/check_boot_hdd.py $(BUILD)/ipl_hdd.bin $(BUILD)/cbios_hdd.bin $(BUILD)/test_hdd.img m2230b
 	$(PYTHON) tests/test_boot_hdd_directory.py
 	$(PYTHON) tests/check_format_source.py
 	$(PYTHON) tests/check_fdformat_boot_patch.py $(BUILD)/cbios.bin $(BUILD)/cbios_2hd.bin $(BUILD)/cbios_hdd.bin
