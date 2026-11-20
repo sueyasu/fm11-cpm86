@@ -20,10 +20,10 @@ assert "call local_putc" in bios.split("\nCONOUT:\n", 1)[1].split("\nLISTOUT:\n"
 assert "call serial_putc_mirror" in bios
 assert "mov byte [ansi_state],0" in bios.split("\nINIT:\n",1)[1].split("\nWBOOT:\n",1)[0]
 
-# Preserve all caller registers and FLAGS through the CP/M CONOUT entry.
+# Preserve caller registers and FLAGS except the private transport CF.
 entry = ansi.split("\nansi_putc:\n",1)[1].split("\n; Raw native output:",1)[0]
 for instruction in ("pushf", "push ax", "push bx", "push cx", "push dx",
-                    "push si", "push di", "pop di", "pop si", "pop dx",
+                    "push si", "push di", "push bp", "pop bp", "pop di", "pop si", "pop dx",
                     "pop cx", "pop bx", "pop ax", "popf"):
     assert instruction in entry, instruction
 
@@ -46,4 +46,8 @@ for param in ("cmp al,1", "cmp al,5", "cmp al,7",
 assert ".clear1loop:" in ansi and ".line_all:" in ansi
 assert "ansi_work_row db 1" in ansi and "ansi_work_col db 1" in ansi
 assert "ansi_iter db 1" in ansi
+assert "ANSI_MAX_PARAMS equ 8" in ansi
+assert "mov al,255" in ansi
+assert "jc ansi_putc.failed" in ansi
+assert "mov sp,bp" in ansi
 print("PASS: local ANSI/VT100 parser, native FM-11 control mapping, preserved serial routing")
