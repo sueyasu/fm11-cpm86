@@ -2,14 +2,12 @@
 ; Fits four 128-byte FM boot sectors on C0/H0. The first action is relocation
 ; from physical 07C00h to 01000h, because the 0x3E00-byte resident
 ; image loaded at 04000h..07DFFh would overwrite the running IPL.
-; Serial diagnostics: I=entry, R=relocated, .=sector, E=read error,
-; V=CBIOS vector mismatch, J=jump to CBIOS.
+; Normal boot is silent until CBIOS startup; errors halt.
 cpu 8086
 bits 16
 org 0
 
 SER_STATUS equ 0xFD07
-SER_DATA   equ 0xFD06
 DMA_ADDR   equ 0x12
 DMA_COUNT  equ 0x13
 DMA_TC     equ 0x18
@@ -29,7 +27,7 @@ relocate:
     cli
     xor ax,ax
     mov ss,ax
-    mov sp,0x9000             ; establish stack BEFORE calling putc
+    mov sp,0x9000             ; private IPL stack
     push cs
     pop ds
     mov dx,SER_STATUS
@@ -53,8 +51,6 @@ relocate:
     mov al,0x37               ; DTR and TxEN asserted
     out dx,al
 .serial_ready:
-    mov al,'I'
-    call putc
     mov ax,0x0100
     mov es,ax
     xor si,si
@@ -67,21 +63,13 @@ relocate:
 boot:
     xor ax,ax
     mov ds,ax
-    mov al,'R'
-    call putc
     mov bx,0x4000             ; 8237 CH1 physical DMA destination
     xor bp,bp                 ; cylinder
     mov di,1                  ; C0/H1: first 256-byte resident sector
     mov si,1                  ; C0/H0 contains 128-byte FM IPL sectors
 .loop:
     call read256
-    jnc .read_ok
-    mov al,'E'
-    call putc
-    jmp halt
-.read_ok:
-    mov al,'.'
-    call putc
+    jc halt
     add bx,256
     cmp bx,0x7E00             ; 62 sectors, 04000h..07DFFh
     je loaded
@@ -100,13 +88,7 @@ loaded:
     mov ax,0x0400
     mov es,ax
     cmp byte [es:0x2500],0xE9
-    je .valid
-    mov al,'V'
-    call putc
-    jmp halt
-.valid:
-    mov al,'J'
-    call putc
+    jne halt
     jmp 0x0400:0x2500
 
 halt:
@@ -114,30 +96,6 @@ halt:
 .again:
     hlt
     jmp .again
-
-; Serial output does not disturb the load loop's registers.
-putc:
-    push ax
-    push cx
-    push dx
-    mov ah,al
-    mov dx,SER_STATUS
-    mov cx,0xFFFF              ; no indefinite loop if TXRDY stays low
-.wait:
-    in al,dx
-    test al,1
-    jnz .ready
-    loop .wait
-    jmp .done                  ; no serial connection or USART failure
-.ready:
-    mov dx,SER_DATA
-    mov al,ah
-    out dx,al
-.done:
-    pop dx
-    pop cx
-    pop ax
-    ret
 
 ; BX=DMA destination (bank 0); BP=cylinder; DI=head; SI=sector.
 ; Preserves BX/BP/DI/SI, clobbers AX/CX/DX.

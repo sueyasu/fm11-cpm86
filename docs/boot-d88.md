@@ -63,42 +63,24 @@ The build target checks D88 geometry, sector payload round-trips, exact
 resident placement and preservation of the CP/M filesystem. These
 structural checks do not constitute a runtime boot test.
 
-## Serial diagnostics in the disk IPL
+## USART initialization and silent boot
 
-The 512-byte IPL initializes the shared 8251 on ports FD07h (status)
-and FD06h (data), then prints single-character stage markers:
+The 2D and 2HD disk IPLs no longer emit serial progress or error markers.
+They still initialize the shared 8251 via FD07h if TXRDY is clear, using
+three zero control writes followed by 40h, 4Eh and 37h (TX/RX enabled,
+DTR asserted). An already-ready USART is left untouched, avoiding the
+original emulator's DTR-triggered terminal disconnect. The IPL does not
+wait for terminal input. The CBIOS retains its ordinary startup banner
+and console routing.
 
-- `I` — entered the disk IPL at `07C0:0000` and initialized serial.
-- `R` — copied the IPL to `0100:0000` and entered the relocated code.
-- `.` — one 256-byte resident sector read succeeded; 62 dots expected.
-- `J` — confirmed the CBIOS E9h vector and about to jump to INIT.
-- `E` — sector-read failure (FDC status or DMA terminal-count check).
-  The compact 512-byte IPL omits hexadecimal CHS reporting to fit the boot sectors.
-- `V` — loaded CBIOS first vector byte is not E9h.
+The existing FDC/DMA checks and CBIOS first-vector E9h check remain in
+place; a failure halts without printing a diagnostic character.
 
-The `E` / `V` cases halt without further output. `J` proceeds to the
-CBIOS, so a later CBIOS banner should appear. To avoid consuming the
-first serial character, the IPL does **not** wait for terminal input.
+Earlier development builds emitted I/R/dots/J and E/V failure markers.
+Those routines have been removed from both normal floppy IPLs. The HDD
+IPL did not contain these markers. Standalone diagnostic ROMs and the
+CBIOS self-test remain available separately.
 
-**Connect the serial terminal before starting the original emulator.**
-An early `I` may be lost if the PTY is attached after the IPL begins.
-The output is designed to be compact enough for the 512-byte boot sector,
-rather than provide a verbose interactive diagnostic.
-
-## 8088 original emulator: serial TX wait at 07CA9h (development history)
-
-The original emulator v128 implements the shared 8251 as a state machine
-(`Fm11/MainCpu.cpp`, `Fm11RS232C`). A cold or warm boot need not leave
-its mode/command parser in the initial `Init=0` state. Previously, the
-disk IPL wrote only `4Eh` (mode) and `37h` (command). If interpreted in
-the wrong parser state, TXRDY bit 0 can remain clear and the first
-diagnostic output spins in `IN AL,DX / TEST AL,1 / JZ`. On the original
-emulator a stop at physical `07CA9h` with `JZ FB` matches this loop.
-
-The disk IPL now issues three zero control writes, `40h` (8251 internal
-reset), `4Eh` (asynchronous mode) and `37h` (enable TX/RX). These
-writes synchronize the 8251 parser from any of its four initial states.
-It also bounds the serial TX-ready polling, so a missing USART or
-non-ready transmitter cannot block the resident disk loader forever.
-Missing stage letters therefore no longer necessarily mean the disk
-IPL was never entered: examine the PC or later resident startup as well.
+Rebuild floppy images with `make boot-2d` and `make boot-2hd`.
+To update IPL templates embedded in FORMAT.CMD, run `make format-inc`
+and rebuild the command as described in [command/README.md](../command/README.md).

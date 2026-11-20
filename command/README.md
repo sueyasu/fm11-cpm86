@@ -44,6 +44,8 @@ A>GENCMD FORMAT
 
 生成したFORMAT.CMDを使用してください。ASM86.CMDとGENCMD.CMDは別途用意する必要があります。
 
+IPLを変更した場合は、再度 `make format-inc` を実行してからFORMAT.CMDを再作成してください。従来のFORMAT.CMDには旧IPLが埋め込まれているため、2D／2HDの起動用ディスクを `/S` で作成すると旧IPLの診断表示が残る場合があります。
+
 ## ANSITEST.CMD
 
 ローカル画面のANSI/VT100制御を確認するためのコマンドです。ディスクの内容を変更しません。
