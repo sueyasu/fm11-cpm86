@@ -15,7 +15,7 @@ Provide the external 0x2500-byte CP/M-86 core at
 
 Outputs are `build/ipl_2hd.bin` (512 bytes),
 `build/cbios_2hd.bin` (0x1900 bytes),
-`build/fm11_cpm86_2hd.raw` (256-byte slot representation), and
+`build/fm11_cpm86_2hd.raw` (1,021,696-byte unpadded sector payload stream), and
 `build/fm11_cpm86_2hd.d88` (native mixed-sector D88).
 
 ## Physical layout
@@ -37,10 +37,13 @@ AL0=80h, AL1=0, CKS=16, OFF=4. There are 243 usable 4-KiB
 allocation blocks, including directory block 0. A 31-byte ALV
 and 16-byte CSV are reserved per 2HD drive.
 
-The raw image uses 256-byte sectors throughout for logical tooling
-compatibility; the first four IPL sectors occupy the first 128 bytes
-of their 256-byte slots. The D88 stores those as actual 128-byte FM
-records. The raw and D88 files are therefore not byte-identical.
+The RAW image concatenates the D88 sector payloads in cylinder/head/sector
+order without padding or headers. C0/H0 occupies 0x0d00 bytes; the resident
+starts at 0x0d00, and the filesystem starts at 0x5b00 (23296 bytes).
+The supplied `diskdefs` uses `offset 23296`, `tracks 150`, and `boottrk 0`
+to expose only the uniform filesystem area to cpmtools. The BIOS DPB
+and D88 sector layout are unchanged. Old padded RAW images are incompatible
+with this definition; recreate them from D88 or migrate their files first.
 
 Run `make test` without a proprietary CP/M core to verify geometry,
 D88 record headers, CBIOS layout, resident placement, and allocations

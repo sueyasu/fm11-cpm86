@@ -5,8 +5,7 @@ Boot C0/H0: 26 sectors x 128 bytes, FM; IPL in sectors 1..4.
 Other tracks: 26 sectors x 256 bytes, MFM.
 Resident (0x3E00 bytes): C0/H1/S1 onward, 62 x 256 bytes.
 CP/M filesystem: C2/H0 onward (OFF=4), 4 KiB allocation blocks.
-The accompanying .raw is a 256-byte-slot representation of every sector;
-only the first 128 bytes of each sector in C0/H0 are used by the D88 image.
+The accompanying .raw concatenates actual sector payloads without padding.
 """
 from pathlib import Path
 import argparse
@@ -19,9 +18,11 @@ HEADS = 2
 SECTORS = 26
 SECTOR_BYTES = 256
 SIDE_BYTES = SECTORS * SECTOR_BYTES
-RAW_BYTES = CYLINDERS * HEADS * SIDE_BYTES
+BOOT_SECTOR_BYTES = 128
+BOOT_SIDE_BYTES = SECTORS * BOOT_SECTOR_BYTES
+RAW_BYTES = BOOT_SIDE_BYTES + (CYLINDERS * HEADS - 1) * SIDE_BYTES
 RESERVED_SIDES = 4
-RESERVED_BYTES = RESERVED_SIDES * SIDE_BYTES
+RESERVED_BYTES = BOOT_SIDE_BYTES + (RESERVED_SIDES - 1) * SIDE_BYTES
 RESIDENT_BYTES = 0x3e00
 CORE_BYTES = 0x2500
 BIOS_BYTES = 0x1900
@@ -46,11 +47,9 @@ def build_raw(core: bytes, bios: bytes, ipl: bytes, files) -> bytes:
         raise AssertionError("2HD disk layout and reserved system area disagree")
 
     raw = bytearray([ERASED]) * RAW_BYTES
-    # The first physical side is FM, 26 x 128 bytes in the D88 output.
-    for sector in range(4):
-        start = sector * SECTOR_BYTES
-        raw[start:start+128] = ipl[sector*128:(sector+1)*128]
-    raw[SIDE_BYTES:SIDE_BYTES+RESIDENT_BYTES] = core + bios
+    # The first physical side is FM, 26 x 128 bytes in both outputs.
+    raw[:IPL_BYTES] = ipl
+    raw[BOOT_SIDE_BYTES:BOOT_SIDE_BYTES+RESIDENT_BYTES] = core + bios
     directory = bytearray([ERASED]) * (DIRECTORY_ENTRIES*32)
     used_names = set()
     free_block = 1                # directory takes allocation block zero
@@ -109,6 +108,7 @@ def make_d88(raw: bytes, label: str) -> bytes:
     out = bytearray(HEADER_BYTES)
     out[:len(title)] = title
     out[0x1b] = 0x20
+    offset = 0
     for side_track in range(CYLINDERS*HEADS):
         struct.pack_into("<I", out, 0x20+4*side_track, len(out))
         cyl, head = divmod(side_track, 2)
@@ -119,8 +119,9 @@ def make_d88(raw: bytes, label: str) -> bytes:
             sector = index+1
             out += struct.pack("<BBBBHBBB5sH", cyl, head, sector, n,
                                SECTORS, density, 0, 0, b"\0"*5, length)
-            offset = (side_track*SECTORS+index)*SECTOR_BYTES
             out += raw[offset:offset+length]
+            offset += length
+    assert offset == len(raw)
     struct.pack_into("<I", out, 0x1c, len(out))
     return bytes(out)
 
