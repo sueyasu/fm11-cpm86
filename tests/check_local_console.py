@@ -2,14 +2,14 @@
 """Static regression of the FM-11 CP/M-86 local console and serial fallback.
 
 This validates the source-level hardware command protocol, CBIOS ABI
-selection, boot ROM startup gating, and local/serial binary dimensions.
+selection, HDD disk IPL handoff, and local/serial CBIOS dimensions.
 It does NOT substitute for an emulator keyboard/display integration test.
 """
 from pathlib import Path
 
 cbios = Path("src/cbios.asm").read_text()
 local = Path("src/cbios_local_console.inc").read_text()
-hdd = Path("src/hdd_bootrom.asm").read_text()
+ipl_hdd = Path("src/ipl_hdd.asm").read_text()
 makefile = Path("Makefile").read_text()
 
 assert "%define CONSOLE_LOCAL 1" in cbios
@@ -60,20 +60,21 @@ assert "local_poll:" in local
 assert "local_const:" in local
 assert "local_conin:" in local
 
-for text, name in ((hdd, "HDD reset ROM"),):
-    assert "%if CONSOLE_LOCAL = 0" in text, f"{name}: local boot still waits for PTY"
-    assert "%endif" in text
-    assert "%define CONSOLE_LOCAL 1" in text
-
-for name in ("cbios_serial.bin", "hdd_bootrom_serial.bin"):
-    assert name in makefile
+# The current HDD boot path loads the 512-byte on-disk IPL, then
+# transfers control to CBIOS. It no longer builds a separate HDD reset ROM.
+assert 'org 0' in ipl_hdd
+assert 'jmp 0x0400:0x2500' in ipl_hdd
+assert 'src/ipl_hdd.asm' in makefile
+assert 'src/hdd_bootrom.asm' not in makefile
+assert 'hdd_bootrom_serial.bin' not in makefile
+assert '$(BUILD)/cbios_serial.bin:' in makefile
+assert '$(BUILD)/cbios_hdd.bin:' in makefile
 assert "tests/check_local_console.py" in makefile
 
-for name in ("cbios", "cbios_serial"):
+for name in ("cbios", "cbios_serial", "cbios_hdd"):
     path = Path("build") / (name + ".bin")
     assert path.exists() and path.stat().st_size == 0x1900, name
-for name in ("hdd_bootrom", "hdd_bootrom_serial"):
-    path = Path("build") / (name + ".bin")
-    assert path.exists() and path.stat().st_size == 0x1000, name
+ipl_path = Path("build/ipl_hdd.bin")
+assert ipl_path.exists() and ipl_path.stat().st_size == 512
 
-print("PASS: local FM-11 FD05/FC80 console ABI, key handling and serial fallback binaries")
+print("PASS: local FD05/FC80 console ABI, HDD IPL handoff and CBIOS variants")
