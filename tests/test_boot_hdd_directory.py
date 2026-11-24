@@ -11,7 +11,6 @@ def main():
     root = Path("build")
     ipl = (root / "ipl_hdd.bin").read_bytes()
     cbios = (root / "cbios_hdd.bin").read_bytes()
-    rom = (root / "hdd_bootrom.bin").read_bytes()
     core = bytes(0x2500)
     model = "m2230b"
     with TemporaryDirectory() as tmp:
@@ -24,7 +23,7 @@ def main():
         cmd.write_bytes(b"CMD" * 3000)
         files = [a86, inc, cmd]
         image = build_image(model, ipl, core, cbios, files)
-        check(rom, ipl, cbios, image, model)
+        check(ipl, cbios, image, model)
         heads = MODELS[model][1]
         directory_start = heads * SPT * SECTOR
         directory = image[directory_start:directory_start + BLOCK]
