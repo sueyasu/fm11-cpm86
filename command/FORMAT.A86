@@ -1163,14 +1163,22 @@ fp_type1_done:
         ret
 
 floppy_idle:
+        ; Timed FDC: a full 2HD SEEK may take over two seconds.
+        ; Use a bounded outer timeout like the CBIOS disk path.
+        push    bx
+        mov     bx,64
+fp_idle_retry:
         mov     cx,0ffffh
 fp_poll:
         in      al,dx
         test    al,1
         jz      fp_idle_done
         loop    fp_poll
+        dec     bx
+        jnz     fp_idle_retry
         stc
 fp_idle_done:
+        pop     bx
         ret
 
 ; ----- Single physical FM-11 MDC hard disk --------------------------

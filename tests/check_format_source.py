@@ -101,6 +101,13 @@ assert "call    bios_cache_reset" in reset_exit
 assert reset_exit.index("call    bios_cache_reset") < reset_exit.index("int     BDOSINT")
 failed = source.split("io_failed:", 1)[1].split("cache_reset_failed:", 1)[0]
 assert "jmp     reset_exit" in failed
+# FORMAT /S reads 62 physical resident sectors and may need full-stroke
+# timed seeks. Reject the former single 0xFFFF-cycle timeout.
+seek_wait = source.split("floppy_idle:", 1)[1].split("; ----- Single physical", 1)[0]
+assert "mov     bx,64" in seek_wait
+assert "mov     cx,0ffffh" in seek_wait
+assert "dec     bx" in seek_wait and "jnz     fp_idle_retry" in seek_wait
+assert "push    bx" in seek_wait and "pop     bx" in seek_wait
 assert "call    floppy_position" in source
 assert "positioned_drive db     0ffh" in source
 assert "mov     al,00bh" in source
