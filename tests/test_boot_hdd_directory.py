@@ -43,7 +43,7 @@ def main():
             directory[16:18]
         )
         try:
-            check(rom, ipl, cbios, corrupt, model)
+            check(ipl, cbios, corrupt, model)
         except AssertionError as exc:
             assert "duplicate block" in str(exc)
         else:
