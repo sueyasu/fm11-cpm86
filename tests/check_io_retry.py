@@ -38,6 +38,12 @@ assert "cmp al,ch" in seek and "mov [fdc_cylinder+si],ch" in seek
 assert "mov byte [fdc_cylinder+si],0xff" in fdc
 assert fdc.index("out dx,al\n    call fdc_seek") < fdc.index("mov dx,0x1c")
 assert "test al,1" in bios.split("fdc_wait_idle:", 1)[1]
+# A single 0xFFFF poll loop is too short for full-stroke 2HD SEEK in
+# timed FDC mode (76 tracks x 30 ms). Bound retries with an outer loop.
+wait = bios.split("fdc_wait_idle:", 1)[1].split("fdc_forget_all:", 1)[0]
+assert "mov bx,64" in wait and "mov cx,0xffff" in wait
+assert "dec bx" in wait and "jnz .retry" in wait
+assert "push bx" in wait and "pop bx" in wait
 cache = Path("src/cbios_track_cache.inc").read_text()
 assert cache.count("jmp fdc_forget_all") == 2
 print("PASS: bounded physical FDD/MDC retries, DMA reinitialization and per-drive SEEK contracts")
