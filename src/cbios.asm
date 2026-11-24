@@ -960,16 +960,27 @@ fdc_type1:
     ret
 
 fdc_wait_idle:
+    ; The timed FDC models physical head travel. A 0x1B SEEK can
+    ; take 76 * 30 ms + settling (over two seconds on 2HD).
+    ; The former single 0xFFFF poll loop timed out mid-SEEK and
+    ; turned ordinary BDOS reads into Bad Sector errors.
+    ; Keep a bounded timeout, but permit full-stroke positioning.
+    push bx
     push cx
+    mov bx,64
+.retry:
     mov cx,0xffff
 .poll:
     in al,dx
     test al,1
     jz .done                 ; TEST clears CF
     loop .poll
+    dec bx
+    jnz .retry
     stc
 .done:
     pop cx
+    pop bx
     ret
 
 ; Cold init and cache reset/media login must forget hardware positions.
