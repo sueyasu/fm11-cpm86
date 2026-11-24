@@ -93,6 +93,14 @@ for dtype, cylinders, heads in geometries:
     assert 1 < blocks < 65536
     assert heads >= 2  # 16KiB directory fits at start of cylinder 1
 assert max(c*h*32*256 for _,c,h in geometries) == 67313664
+# Direct FDC operations invalidate both the BIOS sector cache and its
+# remembered physical cylinder positions before BDOS resumes. Errors after
+# a partial format must take the same route.
+reset_exit = source.split("reset_exit:", 1)[1].split("exit_program:", 1)[0]
+assert "call    bios_cache_reset" in reset_exit
+assert reset_exit.index("call    bios_cache_reset") < reset_exit.index("int     BDOSINT")
+failed = source.split("io_failed:", 1)[1].split("cache_reset_failed:", 1)[0]
+assert "jmp     reset_exit" in failed
 assert "call    floppy_position" in source
 assert "positioned_drive db     0ffh" in source
 assert "mov     al,00bh" in source
