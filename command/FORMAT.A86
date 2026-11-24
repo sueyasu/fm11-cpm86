@@ -218,6 +218,9 @@ io_failed:
         mov     al,Byte Ptr io_sector
         call    hex8
         call    crlf
+        ; A partial physical format also leaves the head at an unknown
+        ; position relative to CBIOS's cached fdc_cylinder[] table.
+        jmp     reset_exit
 
 cache_reset_failed:
         mov     dx,offset msg_cache_error
@@ -226,6 +229,12 @@ cache_reset_failed:
         jmp     exit_program
 
 reset_exit:
+        ; FORMAT uses the FDC directly, bypassing CBIOS's fdc_cylinder[]
+        ; position cache. Discard its positions (and sector cache) before
+        ; returning to BDOS. In timed emulation, the physical head must
+        ; agree with CBIOS before the next READ/WRITE.
+        call    bios_cache_reset
+        jc      cache_reset_failed
         ; Force BDOS to discard directory/allocation state changed
         ; outside the ordinary BIOS/BDOS record-I/O interface.
         mov     cl,13
